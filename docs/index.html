@@ -3,6 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<script>
+  // Opening docs/index.html directly creates a file:// origin. Provider calls
+  // then bypass the local CORS proxy and fail in the browser. Keep the HTML
+  // double-clickable by immediately returning to the local Awen server.
+  if (window.location.protocol === 'file:') {
+    window.location.replace('http://127.0.0.1:8000/');
+  }
+</script>
 <title>Awen Study — Matrix Generator</title>
 <meta name="description" content="Awen Music Matrix — a lo-fi study music generator that produces Suno style boxes, cover art prompts, video prompts, YouTube metadata, and a coherent Awen visual identity across every album.">
 <meta property="og:title" content="Awen Music Matrix" />
@@ -54,10 +62,11 @@
   }
 
   *{ box-sizing:border-box; }
-  html,body{ margin:0; }
+  html,body{ margin:0; max-width:100%; overflow-x:hidden; }
   body{ background:var(--page-bg,#0c0e13); font-family:'Hanken Grotesk',system-ui,sans-serif; }
-  .app{ background:var(--bg); color:var(--ink); min-height:100vh; font-family:var(--font-ui);
-        padding:30px clamp(16px,4vw,44px) 90px; transition:background .35s,color .35s; }
+  .app{ background:var(--bg); color:var(--ink); min-height:100vh; width:100%; overflow-x:hidden;
+        font-family:var(--font-ui); padding:30px clamp(16px,4vw,44px) 90px;
+        transition:background .35s,color .35s; }
   .mono{ font-family:var(--font-mono); }
   ::selection{ background:var(--accent-soft); }
 
@@ -308,6 +317,60 @@
                  padding:9px 11px; margin:3px 0; }
   .kv-structure .v{ font-size:11px; }
 
+  /* ====================== SUNO BRIDGE PANEL ====================== */
+  .suno-bridge{ margin:13px 0 4px; min-width:0; max-width:100%; border:1px solid var(--line2); border-radius:12px;
+                background:linear-gradient(180deg,var(--panel2),var(--panel)); overflow:hidden; }
+  .suno-bridge-head{ display:flex; align-items:center; gap:10px; padding:11px 13px;
+                     border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  .suno-bridge-kicker{ font-family:var(--font-mono); font-size:10px; letter-spacing:.13em;
+                       color:var(--accent); font-weight:700; }
+  .suno-bridge-flow{ font-family:var(--font-mono); font-size:9.5px; color:var(--ink-faint); flex:1; }
+  .suno-route{ display:grid; grid-template-columns:1fr 1fr; gap:7px; padding:11px 13px 0; }
+  .suno-route-btn{ border:1px solid var(--line); border-radius:9px; background:var(--panel);
+                   color:var(--ink-dim); padding:9px 10px; text-align:left; cursor:pointer; }
+  .suno-route-btn:hover{ border-color:var(--line2); color:var(--ink); }
+  .suno-route-btn.on{ border-color:var(--accent); background:var(--accent-soft); color:var(--ink); }
+  .suno-route-title{ display:block; font-size:12px; font-weight:700; }
+  .suno-route-sub{ display:block; margin-top:2px; font-size:10px; line-height:1.4; color:var(--ink-faint); }
+  .suno-bridge-note{ margin:8px 13px 0; padding:7px 9px; border-radius:7px;
+                     background:rgba(224,106,90,.09); color:var(--ink-dim); font-size:10.5px; line-height:1.5; }
+  .suno-bridge-note.safe{ background:var(--accent-soft); }
+  .suno-bridge-body{ min-width:0; padding:10px 13px 13px; display:flex; flex-direction:column; gap:8px; }
+  .suno-field{ min-width:0; border-top:1px solid var(--line); padding-top:8px; }
+  .suno-field:first-child{ border-top:none; padding-top:0; }
+  .suno-field-head{ display:flex; align-items:center; gap:8px; margin-bottom:5px; }
+  .suno-step{ width:19px; height:19px; border-radius:50%; display:inline-flex; align-items:center;
+              justify-content:center; flex:0 0 19px; font-family:var(--font-mono); font-size:9px;
+              color:var(--accent); border:1px solid var(--accent); }
+  .suno-field-label{ font-size:11px; font-weight:750; color:var(--ink); }
+  .suno-field-target{ font-family:var(--font-mono); font-size:9.5px; color:var(--ink-faint); flex:1; }
+  .suno-field-value{ font-family:var(--font-mono); font-size:11px; line-height:1.55; color:var(--ink-dim);
+                     white-space:pre-wrap; word-break:break-word; }
+  .suno-param-grid{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; }
+  .suno-param{ border:1px solid var(--line); border-radius:8px; background:var(--panel2); padding:8px 9px; }
+  .suno-param-label{ display:block; font-size:9px; color:var(--ink-faint); margin-bottom:3px; }
+  .suno-param-value{ display:block; font-family:var(--font-mono); font-size:14px; color:var(--accent); }
+  .suno-asset-fold,.track-suno-fold{ margin-top:11px; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .suno-asset-fold>summary,.track-suno-fold>summary{ cursor:pointer; padding:10px 12px; color:var(--ink-dim);
+                                                    font-size:11.5px; font-weight:700; list-style:none; }
+  .suno-asset-fold>summary::-webkit-details-marker,.track-suno-fold>summary::-webkit-details-marker{ display:none; }
+  .suno-asset-fold>summary::before,.track-suno-fold>summary::before{ content:'＋'; color:var(--accent); margin-right:7px; }
+  .suno-asset-fold[open]>summary::before,.track-suno-fold[open]>summary::before{ content:'−'; }
+  .suno-asset-body{ padding:0 11px 11px; }
+  .track-suno-fold{ grid-column:1 / -1; width:100%; }
+  .track-suno-fold .suno-bridge{ margin:0; border:none; border-top:1px solid var(--line); border-radius:0; }
+
+  @media (max-width:900px){
+    .suno-bridge-flow{ flex-basis:100%; order:3; }
+    .suno-field-head{ flex-wrap:wrap; }
+    .suno-field-target{ min-width:0; }
+  }
+  @media (max-width:720px){
+    .suno-param-grid{ grid-template-columns:1fr; }
+    .suno-route{ grid-template-columns:1fr; }
+    .suno-field-target{ flex-basis:calc(100% - 30px); }
+  }
+
   .sk{ display:flex; flex-direction:column; gap:9px; padding:6px 0; }
   .sk-line{ height:11px; border-radius:6px;
             background:linear-gradient(90deg,var(--line) 25%,var(--line2) 37%,var(--line) 63%);
@@ -431,6 +494,19 @@
   .settings-input{ background:var(--panel2); border:1px solid var(--line2); border-radius:8px; padding:8px 12px;
                    font-family:var(--font-mono); font-size:13px; color:var(--ink); width:100%; outline:none; }
   .settings-input:focus{ border-color:var(--accent); }
+  select.settings-input{ appearance:auto; }
+  .settings-grid{ display:grid; grid-template-columns:1fr 1fr; gap:9px; }
+  .settings-field{ display:flex; flex-direction:column; gap:5px; min-width:0; }
+  .settings-field.full{ grid-column:1 / -1; }
+  .settings-range-label{ display:flex; justify-content:space-between; align-items:center; gap:12px;
+                         font-size:11px; color:var(--ink-dim); }
+  .settings-range-label b{ font-family:var(--font-mono); color:var(--accent); font-size:12px; }
+  .settings-range{ width:100%; accent-color:var(--accent); cursor:pointer; }
+  .settings-actions{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .settings-clear-btn{ background:transparent; color:var(--ink-faint); border:1px solid var(--line2);
+                       border-radius:8px; padding:7px 13px; font-size:12px; cursor:pointer; }
+  .settings-clear-btn:hover{ color:var(--ink); border-color:var(--ink-faint); }
+  .settings-error{ font-size:11.5px; color:#e57373; line-height:1.45; }
   .settings-save-btn{ align-self:flex-start; background:var(--accent); color:var(--accent-ink); border:none;
                       border-radius:8px; padding:7px 18px; font-weight:700; font-size:13px; cursor:pointer; }
   .settings-save-btn:disabled{ opacity:.4; cursor:default; }
@@ -861,9 +937,9 @@
                           cap the arrangement to 1 lead + 1–2 support instruments
                           (restraint is the source of authentic lo-fi).
        2. "album too bland" → give each track ONE signature element by role.
-       3. "flat start to finish" → emit a metatag ARRANGEMENT (Intro→build→
-                          breakdown→outro) for Suno's Lyrics box, so the track
-                          has an actual arc instead of "continuing the vibe."
+       3. "flat start to finish" → emit a restrained section arc for the
+                          optional Prompt experiment; the stable Instrumental
+                          route keeps Lyrics empty.
      Lo-fi best practice followed throughout: describe groove + texture first;
      avoid "crisp / polished"; keep the Style box tight. */
 
@@ -897,12 +973,12 @@
   };
   function roleSignature(role) { return ROLE_SIGNATURE[role] || 'a single memorable melodic phrase anchors the track'; }
 
-  // Build the metatag ARRANGEMENT that goes in Suno's Lyrics box.
-  // This is what gives an instrumental a beginning / middle / end.
+  // Build the reference ARRANGEMENT used by Awen's optional Prompt experiment.
+  // It describes a beginning / middle / end without becoming song lyrics.
   // `role` is optional (album tracks pass it); singles use a balanced default.
   // V3.0 default style-reinforcement words. Appended to every STYLE box —
-  // these push Suno toward 4-6 min Spotify-grade pieces instead of 1-2 min loops.
-  const V3_LONGFORM = 'long-form composition, slow evolving arrangement, extended instrumental passages, multiple motif returns, gradual development, patient pacing, organic dynamics, late climax, extended outro, deep focus atmosphere, minimal repetition changes, high fidelity, studio quality, no vocals';
+  // these push Suno toward longer, low-distraction pieces instead of short loops.
+  const V3_LONGFORM = 'long-form composition, slow evolving arrangement, extended instrumental passages, multiple motif returns, gradual development, patient pacing, restrained organic dynamics, sparse variation, no dramatic climax, gentle extended outro, deep focus atmosphere, subtle repetition changes, warm analog texture, no vocals';
 
   // V4 LYRICS imagery vocabulary — LYRICS must be PURE cinematic imagery:
   // weather, light, room, time, motion, memory. NEVER audio-engineering words
@@ -1345,7 +1421,7 @@
         key: musicalKey(s.mood),
         motif: coreMotif(s.instrument),
         prompt: `Instrumental ${s.style.toLowerCase()} led by ${s.instrument.toLowerCase()}${natureClause}, ${s.mood.toLowerCase()} and study-friendly.`,
-        exclude: 'vocals, lyrics, harsh percussion, sudden dynamics, polished, crisp',
+        exclude: 'vocals, singing, spoken word, harsh percussion, sudden dynamics, crisp, polished',
       },
       cover: coverV2(s),
       video: videoV2(s),
@@ -1671,7 +1747,7 @@
       hintShuffle: '锁定满意的维度，摇号生成其余（老虎机式）。',
       hintDecompose: '从导入的参考曲拆解出发，逐项变异 remix。',
       hintAlbum: '锁定声音身份，沿一条行进轴一次铺出整张专辑。',
-      hintLibrary: '收藏的好歌，永久保存在 GitHub，换设备也不丢。点 ⭐ 收藏一首歌，自动推送到 GitHub。',
+      hintLibrary: '收藏先保存在当前浏览器；配置 GitHub PAT 后可同步到自己的仓库，实现跨设备使用。',
       recipeNow: '当前配方',
       srcLabel: '原曲',
       mutated: (p) => `+${p.n} 处变异`,
@@ -1749,7 +1825,7 @@
       hintShuffle: 'Lock the dimensions you like, slot-machine the rest.',
       hintDecompose: 'Start from the imported reference and mutate it track by track.',
       hintAlbum: 'Lock one sonic identity, traverse an axis to lay out a whole album.',
-      hintLibrary: 'Favourites saved permanently in GitHub — never lost across devices. Click ⭐ on any card to save it.',
+      hintLibrary: 'Favourites are saved locally first; configure GitHub sync for cross-device access.',
       recipeNow: 'CURRENT RECIPE',
       srcLabel: 'source',
       mutated: (p) => `+${p.n} mutated`,
@@ -1840,11 +1916,11 @@
         { t: '④ 复制 → 出歌', d: '点卡片上的复制按钮，把 Prompt 粘进 Suno 生成音频、粘进 Veo 生成画面。复制内容已分段标好，照着填即可。' },
       ],
       sunoH: '把 Prompt 贴进 Suno（最容易卡住的一步）',
-      sunoNote: 'Suno 的 Custom 模式有三个框，别全塞一个。每首的「Suno」复制按钮已经帮你分好段：',
+      sunoNote: '每张卡片顶部的「Suno 配方」已按当前 Create 页面顺序排列；Lyrics 的 Prompt 与 Instrumental 是两条互斥路线，不要同时执行：',
       sunoRows: [
-        { box: 'Style of Music（风格框）', put: '贴 [STYLE OF MUSIC] 那段 —— 专辑里就是 style anchor，每首都用同一句，音色才统一。' },
-        { box: 'Title（标题）', put: '贴 [TITLE] 那段，就是歌名。' },
-        { box: 'Lyrics / Description（歌词框）', put: '贴 [STRUCTURE] 那段 metatag（[Intro:…] [Main:…] 等），它决定一首歌有没有起伏、是否平淡。纯音乐把 Instrumental 开关打开。' },
+        { box: 'Lyrics 模式', put: '结构实验：选 Prompt 并复制结构描述；如果出现歌词或人声，切换 Instrumental，且不要粘贴 Lyrics 内容。' },
+        { box: 'Style / Exclude / 参数', put: '按顺序复制 Style、Exclude Styles，并设置卡片给出的 Weirdness、Style Influence 与 Duration。' },
+        { box: 'Title / Workspace', put: '复制 Song Title；专辑曲目保存到同一个 “Awen · 专辑名” Workspace。' },
       ],
       anchorH: '专辑里的「Style Anchor」是什么',
       anchorNote: '一张专辑 = 固定的声音身份 + 一条变化的行进轴。anchor 是所有曲子共用的「风格底」，把它贴进每首的风格框，整张专辑音色才统一；每首自己的 prompt 只负责场景与情绪的变化。',
@@ -1869,11 +1945,11 @@
         { t: '④ Copy → make the song', d: 'Use the copy buttons on each card: paste into Suno for audio, into Veo for visuals. The text is pre-segmented — just fill in the boxes.' },
       ],
       sunoH: 'Pasting prompts into Suno (the easy place to get stuck)',
-      sunoNote: 'Suno\'s Custom mode has three fields — don\'t dump everything in one. Each track\'s “Suno” copy is already segmented:',
+      sunoNote: 'The Suno Recipe panel follows the current Create form. Prompt and Instrumental are mutually exclusive Lyrics routes — never run both at once:',
       sunoRows: [
-        { box: 'Style of Music', put: 'Paste the [STYLE OF MUSIC] block — in an album this is the style anchor, identical on every track so the timbre stays consistent.' },
-        { box: 'Title', put: 'Paste the [TITLE] block — the song name.' },
-        { box: 'Lyrics / Description', put: 'Paste the [STRUCTURE] metatags ([Intro:…] [Main:…] etc.) — this is what gives the track an arc. Without it Suno loops flat. Turn the Instrumental toggle ON.' },
+        { box: 'Lyrics mode', put: 'Structure experiment: choose Prompt and paste the structure description. If lyrics or vocals appear, switch to Instrumental and paste no Lyrics content.' },
+        { box: 'Style / Exclude / controls', put: 'Paste Style and Exclude Styles, then set Weirdness, Style Influence, and Duration from the card.' },
+        { box: 'Title / Workspace', put: 'Copy the Song Title and save every album track to the shared “Awen · Album Title” workspace.' },
       ],
       anchorH: 'What the album “Style Anchor” is',
       anchorNote: 'An album = a fixed sonic identity + one moving traversal axis. The anchor is the shared style base for every track; paste it into each track\'s Style box so the whole album stays consistent, while each track\'s own prompt handles the scene and mood variation.',
@@ -2710,6 +2786,197 @@ function RecipeBar({ sel, mode, busy, mutations, onGenerate, onShuffle }) {
   );
 }
 
+/* ---------- Suno delivery bridge ---------- */
+const SUNO_DEFAULTS_KEY = 'awen_suno_defaults_v1';
+const SUNO_RECIPE_DEFAULTS = Object.freeze({
+  lyricsRoute: 'structure-prompt',
+  weirdness: 50,
+  styleInfluence: 70,
+  durationSec: 300,
+});
+const SUNO_EXCLUDE_DEFAULT = 'vocals, singing, spoken word, harsh percussion, sudden dynamics, crisp, polished';
+
+function clampInt(value, min, max, fallback) {
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+}
+function normalizeSunoDefaults(value) {
+  const v = value || {};
+  return {
+    lyricsRoute: v.lyricsRoute === 'instrumental' ? 'instrumental' : 'structure-prompt',
+    weirdness: clampInt(v.weirdness, 0, 100, SUNO_RECIPE_DEFAULTS.weirdness),
+    styleInfluence: clampInt(v.styleInfluence, 0, 100, SUNO_RECIPE_DEFAULTS.styleInfluence),
+    durationSec: clampInt(v.durationSec, 120, 600, SUNO_RECIPE_DEFAULTS.durationSec),
+  };
+}
+function loadSunoDefaults() {
+  try { return normalizeSunoDefaults(JSON.parse(localStorage.getItem(SUNO_DEFAULTS_KEY) || 'null')); }
+  catch (e) { return { ...SUNO_RECIPE_DEFAULTS }; }
+}
+function saveSunoDefaults(value) {
+  const clean = normalizeSunoDefaults(value);
+  try { localStorage.setItem(SUNO_DEFAULTS_KEY, JSON.stringify(clean)); } catch (e) {}
+  return clean;
+}
+function sunoDurationLabel(seconds) {
+  const s = clampInt(seconds, 0, 36000, 300);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+function sunoStructurePrompt(skeleton) {
+  const tags = String(skeleton || '')
+    .split(/\n+/).map(x => x.trim()).filter(Boolean)
+    .filter(x => !/^\[Instrumental\]$/i.test(x) && !/^\[End\]$/i.test(x))
+    .join(' → ');
+  return `Instrumental-only study composition with no sung words or spoken voice. Follow this restrained section arc: ${tags || '[Intro] → [Main Focus] → [Sparse Variation] → [Main Focus] → [Soft Outro]'}. Keep every transition gentle, avoid a dramatic climax, and end with a soft natural fade.`;
+}
+function normalizeSunoExclude(value) {
+  const terms = `${SUNO_EXCLUDE_DEFAULT}, ${String(value || '')}`
+    .split(',').map(x => x.trim()).filter(Boolean);
+  return [...new Map(terms.map(term => [term.toLowerCase(), term])).values()].join(', ');
+}
+function normalizeSunoStyle(value) {
+  const parts = String(value || '').split(',').map(x => x.trim()).filter(Boolean);
+  const migrated = parts.flatMap(part => {
+    const lower = part.toLowerCase();
+    if (lower === 'late climax') return ['no dramatic climax'];
+    if (lower === 'high fidelity') return ['warm analog texture'];
+    if (lower === 'studio quality') return [];
+    if (lower === 'organic dynamics') return ['restrained organic dynamics'];
+    if (lower === 'minimal repetition changes') return ['subtle repetition changes'];
+    if (lower === 'extended outro') return ['gentle extended outro'];
+    return [part];
+  });
+  const seen = new Set();
+  return migrated.filter(part => {
+    const key = part.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).join(', ');
+}
+function normalizeSunoRecipe(recipe, fallback = {}) {
+  const d = normalizeSunoDefaults(recipe || fallback);
+  const skeleton = String(recipe?.lyricsSkeleton || fallback.lyricsSkeleton || fallback.lyrics || '');
+  return {
+    lyricsRoute: d.lyricsRoute,
+    structurePrompt: String(recipe?.structurePrompt || fallback.structurePrompt || sunoStructurePrompt(skeleton)),
+    lyricsSkeleton: skeleton,
+    style: normalizeSunoStyle(recipe?.style || fallback.style || ''),
+    exclude: normalizeSunoExclude(recipe?.exclude || fallback.exclude),
+    weirdness: d.weirdness,
+    styleInfluence: d.styleInfluence,
+    durationSec: d.durationSec,
+    title: String(recipe?.title || fallback.title || ''),
+    workspace: String(recipe?.workspace || fallback.workspace || 'Awen · Singles'),
+  };
+}
+function buildSunoRecipe(suno, title, workspace, defaults) {
+  const cfg = normalizeSunoDefaults(defaults);
+  return normalizeSunoRecipe({
+    ...cfg,
+    lyricsSkeleton: suno?.lyrics || suno?.structure || '',
+    style: suno?.style || '',
+    exclude: suno?.exclude || SUNO_EXCLUDE_DEFAULT,
+    title,
+    workspace,
+  });
+}
+function attachSongSunoRecipe(ai, defaults, workspace = 'Awen · Singles') {
+  if (!ai) return ai;
+  const suno = ai.suno || {};
+  return { ...ai, suno: { ...suno, recipe: buildSunoRecipe(suno, ai.title, workspace, defaults) } };
+}
+function attachAlbumSunoRecipes(data, defaults) {
+  if (!data) return data;
+  const workspace = `Awen · ${data.album || 'Untitled Album'}`;
+  const tracks = (data.tracks || []).map(tr => ({
+    ...tr,
+    sunoRecipe: buildSunoRecipe({
+      lyrics: tr.lyrics,
+      style: tr.style || data.anchor,
+      exclude: tr.exclude || SUNO_EXCLUDE_DEFAULT,
+    }, tr.title, workspace, defaults),
+  }));
+  return { ...data, workspace, tracks };
+}
+function sunoRecipeChecklist(recipe, route) {
+  const r = normalizeSunoRecipe({ ...recipe, lyricsRoute: route || recipe?.lyricsRoute });
+  const lyrics = r.lyricsRoute === 'instrumental'
+    ? '[LYRICS MODE]\nInstrumental — do not paste Lyrics content'
+    : `[LYRICS MODE]\nPrompt (experimental)\n\n[STRUCTURE PROMPT]\n${r.structurePrompt}\n\n[STRUCTURE SKELETON · reference]\n${r.lyricsSkeleton}`;
+  return `${lyrics}\n\n[STYLE]\n${r.style}\n\n[EXCLUDE STYLES]\n${r.exclude}\n\n[WEIRDNESS]\n${r.weirdness}%\n\n[STYLE INFLUENCE]\n${r.styleInfluence}%\n\n[DURATION]\n${sunoDurationLabel(r.durationSec)}\n\n[SONG TITLE]\n${r.title}\n\n[SAVE TO WORKSPACE]\n${r.workspace}`;
+}
+
+function SunoField({ step, label, target, value, copyLabel }) {
+  return (
+    <div className="suno-field">
+      <div className="suno-field-head">
+        <span className="suno-step">{step}</span>
+        <span className="suno-field-label">{label}</span>
+        <span className="suno-field-target">→ {target}</span>
+        {value && <CopyBtn text={value} label={copyLabel || '复制'} />}
+      </div>
+      {value && <div className="suno-field-value">{value}</div>}
+    </div>
+  );
+}
+
+function SunoBridgePanel({ recipe, compact = false }) {
+  const normalized = normalizeSunoRecipe(recipe);
+  const [route, setRoute] = React.useState(normalized.lyricsRoute);
+  const isStructure = route === 'structure-prompt';
+  const checklist = sunoRecipeChecklist(normalized, route);
+  return (
+    <section className={'suno-bridge' + (compact ? ' compact' : '')} aria-label="Suno 配方">
+      <div className="suno-bridge-head">
+        <span className="suno-bridge-kicker">SUNO 配方</span>
+        <span className="suno-bridge-flow">Lyrics → Style → Exclude → 参数 → Title → Workspace</span>
+        <CopyBtn text={checklist} label="复制完整清单" />
+      </div>
+      <div className="suno-route" role="group" aria-label="Lyrics 模式">
+        <button type="button" className={'suno-route-btn' + (isStructure ? ' on' : '')}
+          aria-pressed={isStructure} onClick={() => setRoute('structure-prompt')}>
+          <span className="suno-route-title">结构实验 · Prompt</span>
+          <span className="suno-route-sub">保留结构弧线；可能生成歌词或人声</span>
+        </button>
+        <button type="button" className={'suno-route-btn' + (!isStructure ? ' on' : '')}
+          aria-pressed={!isStructure} onClick={() => setRoute('instrumental')}>
+          <span className="suno-route-title">纯音乐 · Instrumental</span>
+          <span className="suno-route-sub">不粘贴 Lyrics，最稳定的 Study 路线</span>
+        </button>
+      </div>
+      <div className={'suno-bridge-note' + (!isStructure ? ' safe' : '')}>
+        {isStructure
+          ? '实验路线：在 Suno Lyrics 选择 Prompt 后粘贴结构描述；若出现歌词或人声，切换右侧 Instrumental 路线。'
+          : '稳定路线：在 Suno Lyrics 选择 Instrumental；下面的 Style、Exclude 和参数保持不变。'}
+      </div>
+      <div className="suno-bridge-body">
+        {isStructure ? <>
+          <SunoField step="1" label="Lyrics 模式" target="Prompt（实验）" value={normalized.structurePrompt} copyLabel="复制结构 Prompt" />
+          {normalized.lyricsSkeleton && <SunoField step="1A" label="结构骨架" target="参考 / A-B 测试" value={normalized.lyricsSkeleton} copyLabel="复制骨架" />}
+        </> : (
+          <SunoField step="1" label="Lyrics 模式" target="Instrumental" value="" />
+        )}
+        <SunoField step="2" label="Style" target="Style of Music" value={normalized.style} copyLabel="Copy Style" />
+        <SunoField step="3" label="Exclude Styles" target="More Options" value={normalized.exclude} copyLabel="Copy Exclude" />
+        <div className="suno-field">
+          <div className="suno-field-head">
+            <span className="suno-step">4</span><span className="suno-field-label">全局生成参数</span>
+            <span className="suno-field-target">→ More Options</span>
+          </div>
+          <div className="suno-param-grid">
+            <div className="suno-param"><span className="suno-param-label">WEIRDNESS · Safe ↔ Chaos</span><span className="suno-param-value">{normalized.weirdness}%</span></div>
+            <div className="suno-param"><span className="suno-param-label">STYLE INFLUENCE · Loose ↔ Strong</span><span className="suno-param-value">{normalized.styleInfluence}%</span></div>
+            <div className="suno-param"><span className="suno-param-label">DURATION</span><span className="suno-param-value">{sunoDurationLabel(normalized.durationSec)}</span></div>
+          </div>
+        </div>
+        <SunoField step="5" label="Song Title" target="Song Title" value={normalized.title} copyLabel="Copy Song Title" />
+        <SunoField step="6" label="Workspace" target="Save to…" value={normalized.workspace} copyLabel="复制 Workspace" />
+      </div>
+    </section>
+  );
+}
+
 /* ---------- skeleton lines while the AI call is in flight ---------- */
 function Skeleton() {
   return (
@@ -2747,6 +3014,25 @@ function LibCard({ item, onRemove, onSetPublished }) {
           {item.sel.bpm && <span className="tag"><b>BPM</b>{item.sel.bpm}</span>}
         </div>
       )}
+      {item.sunoRecipe && (
+        <details className="track-suno-fold">
+          <summary>Suno 配方 · {item.sunoRecipe.weirdness}% / {item.sunoRecipe.styleInfluence}% / {sunoDurationLabel(item.sunoRecipe.durationSec)}</summary>
+          <SunoBridgePanel recipe={item.sunoRecipe} compact />
+        </details>
+      )}
+      {Array.isArray(item.sunoRecipes) && item.sunoRecipes.length > 0 && (
+        <details className="track-suno-fold">
+          <summary>Suno 专辑配方 · {item.sunoRecipes.length} 首 · {sunoDurationLabel(item.sunoRecipes.reduce((n, r) => n + (r.durationSec || 300), 0))}</summary>
+          <div className="suno-asset-body">
+            {item.sunoRecipes.map((recipe, i) => (
+              <details className="track-suno-fold" key={i}>
+                <summary>{String(i + 1).padStart(2, '0')} · {recipe.title}</summary>
+                <SunoBridgePanel recipe={recipe} compact />
+              </details>
+            ))}
+          </div>
+        </details>
+      )}
       <div style={{marginTop:'4px'}}>
         {item.publishedAt ? (
           <span className="lib-pub-badge">📅 发布于 {item.publishedAt}</span>
@@ -2773,6 +3059,13 @@ function LibCard({ item, onRemove, onSetPublished }) {
 function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar }) {
   const A = window.AWEN;
   const ai = song.ai;
+  const sunoRecipe = ai ? normalizeSunoRecipe(ai.suno?.recipe, {
+    lyrics: ai.suno?.lyrics || ai.suno?.structure,
+    style: ai.suno?.style,
+    exclude: ai.suno?.exclude,
+    title: ai.title,
+    workspace: 'Awen · Singles',
+  }) : null;
   const tags = [...A.DIMS.map(d => ({ code: d.code, val: song.sel[d.key] })),
                 { code: 'BPM', val: song.sel.bpm }];
   const status = song.status || 'Draft';
@@ -2807,7 +3100,7 @@ function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar }) {
           )}
           {onStar && !song.generating && song.ai && (
             <button type="button" className={"star-btn" + (song.starred ? " starred" : "")}
-              title={song.starred ? "已收藏到 GitHub 曲库" : "收藏到 GitHub 曲库"}
+              title={song.starred ? "已收藏到曲库" : "收藏到曲库（本地优先）"}
               onClick={() => onStar(song)}>⭐</button>
           )}
           <button type="button" className={"icon-btn" + (song.pinned ? " on" : "")} title={song.pinned ? "已锁定 — 点击解锁" : "锁定 (防误删)"} onClick={() => { if (song.pinned) { if (window.confirm('确认解锁？解锁后此曲目可被删除。')) onPin(song.id); } else { onPin(song.id); } }} style={song.pinned ? {background:"var(--accent)",borderColor:"var(--accent)",color:"var(--accent-ink)",fontSize:"13px"} : {fontSize:"13px"}}>{song.pinned ? '🔒' : '🔓'}</button>
@@ -2826,98 +3119,70 @@ function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar }) {
             {tags.map(t => <span key={t.code} className="tag"><b>{t.code}</b>{t.val}</span>)}
           </div>
 
-          {/* ── LYRICS block (V5: LYRICS FIRST) ── */}
-          {(ai.suno.lyrics || ai.suno.structure) && (
-            <div className="block">
-              <div className="block-head">
-                <div className="block-labels">
-                  <span className="block-label"><Icon name="music" size={12} /> LYRICS</span>
-                  <span className="field-hint">① 贴进 Suno「Lyrics」框，开 Instrumental</span>
+          <SunoBridgePanel recipe={sunoRecipe} />
+
+          <details className="suno-asset-fold">
+            <summary>发布素材 · Cover / Video / Thumbnail / 文件名 / YouTube</summary>
+            <div className="suno-asset-body">
+              {ai.cover && (
+                <div className="block">
+                  <div className="block-head">
+                    <div className="block-labels">
+                      <span className="block-label"><Icon name="image" size={12} /> COVER PROMPT</span>
+                      <span className="field-hint">{T('coverHint')}</span>
+                    </div>
+                    <CopyBtn text={ai.cover} />
+                  </div>
+                  <div className="kv"><span className="v">{ai.cover}</span></div>
                 </div>
-                <CopyBtn text={ai.suno.lyrics || ai.suno.structure} label="Copy Lyrics" />
-              </div>
-              <div className="kv">
-                <span className="v mono" style={{whiteSpace:'pre-wrap', lineHeight:1.7, fontSize:'0.82em'}}>{ai.suno.lyrics || ai.suno.structure}</span>
-              </div>
-            </div>
-          )}
-
-          {/* ── STYLE block (V5: STYLE SECOND) ── */}
-          <div className="block">
-            <div className="block-head">
-              <div className="block-labels">
-                <span className="block-label"><Icon name="bolt" size={12} /> STYLE</span>
-                <span className="field-hint">② 贴进 Suno「Style of Music」框</span>
-              </div>
-              <CopyBtn text={ai.suno.style} label="Copy Style" />
-            </div>
-            <div className="kv"><span className="v mono" style={{whiteSpace:'pre-wrap'}}>{ai.suno.style}</span></div>
-            <div className="kv"><span className="k">note</span><span className="v dim">{ai.suno.prompt}</span></div>
-          </div>
-
-          {ai.cover && (
-            <div className="block">
-              <div className="block-head">
-                <div className="block-labels">
-                  <span className="block-label"><Icon name="image" size={12} /> COVER PROMPT</span>
-                  <span className="field-hint">{T('coverHint')}</span>
+              )}
+              <div className="block">
+                <div className="block-head">
+                  <div className="block-labels">
+                    <span className="block-label"><Icon name="play" size={12} /> VIDEO PROMPT</span>
+                    <span className="field-hint">{T('videoHint')}</span>
+                  </div>
+                  <CopyBtn text={ai.video || ai.veo} />
                 </div>
-                <CopyBtn text={ai.cover} />
+                <div className="kv"><span className="v">{ai.video || ai.veo}</span></div>
               </div>
-              <div className="kv"><span className="v">{ai.cover}</span></div>
-            </div>
-          )}
-
-          <div className="block">
-            <div className="block-head">
-              <div className="block-labels">
-                <span className="block-label"><Icon name="play" size={12} /> VIDEO PROMPT</span>
-                <span className="field-hint">{T('videoHint')}</span>
-              </div>
-              <CopyBtn text={ai.video || ai.veo} />
-            </div>
-            <div className="kv"><span className="v">{ai.video || ai.veo}</span></div>
-          </div>
-
-          {ai.thumb && (
-            <div className="block">
-              <div className="block-head">
-                <div className="block-labels">
-                  <span className="block-label"><Icon name="image" size={12} /> {T('thumbLabel')}</span>
-                  <span className="field-hint">{T('thumbHint')}</span>
+              {ai.thumb && (
+                <div className="block">
+                  <div className="block-head">
+                    <div className="block-labels">
+                      <span className="block-label"><Icon name="image" size={12} /> {T('thumbLabel')}</span>
+                      <span className="field-hint">{T('thumbHint')}</span>
+                    </div>
+                    <CopyBtn text={ai.thumb} />
+                  </div>
+                  <div className="kv"><span className="v">{ai.thumb}</span></div>
                 </div>
-                <CopyBtn text={ai.thumb} />
+              )}
+              <div className="publish-helper">
+                <div className="block">
+                  <div className="block-head">
+                    <div className="block-labels">
+                      <span className="block-label"><Icon name="play" size={12} /> 文件名 / FILENAME</span>
+                      <span className="field-hint">下载 Suno mp3 后改用此名</span>
+                    </div>
+                    <CopyBtn text={A.songFileName(song)} />
+                  </div>
+                  <div className="kv"><span className="v" style={{fontFamily:'var(--font-mono)'}}>{A.songFileName(song)}.wav</span></div>
+                </div>
+                <div className="block">
+                  <div className="block-head">
+                    <div className="block-labels">
+                      <span className="block-label"><Icon name="play" size={12} /> YouTube 标题</span>
+                      <span className="field-hint">集数自动递增</span>
+                    </div>
+                    <CopyBtn text={A.songYouTubeTitle(song)} />
+                  </div>
+                  <div className="kv"><span className="v">{A.songYouTubeTitle(song)}</span></div>
+                </div>
               </div>
-              <div className="kv"><span className="v">{ai.thumb}</span></div>
             </div>
-          )}
+          </details>
         </>
-      )}
-
-      {/* publishing helpers — auto filename + YouTube title */}
-      {!song.generating && (
-        <div className="publish-helper">
-          <div className="block">
-            <div className="block-head">
-              <div className="block-labels">
-                <span className="block-label"><Icon name="play" size={12} /> 文件名 / FILENAME</span>
-                <span className="field-hint">下载 Suno mp3 后改用此名</span>
-              </div>
-              <CopyBtn text={A.songFileName(song)} />
-            </div>
-            <div className="kv"><span className="v" style={{fontFamily:'var(--font-mono)'}}>{A.songFileName(song)}.wav</span></div>
-          </div>
-          <div className="block">
-            <div className="block-head">
-              <div className="block-labels">
-                <span className="block-label"><Icon name="play" size={12} /> YouTube 标题</span>
-                <span className="field-hint">集数自动递增</span>
-              </div>
-              <CopyBtn text={A.songYouTubeTitle(song)} />
-            </div>
-            <div className="kv"><span className="v">{A.songYouTubeTitle(song)}</span></div>
-          </div>
-        </div>
       )}
     </div>
   );
@@ -3075,6 +3340,15 @@ function AlbumCard({ album, onStatus, onDelete, onPin, onStar }) {
 
   const fullTracklist = data && data.tracks.map((t, i) =>
     `${String(i + 1).padStart(2, '0')}. ${t.title}  (${t.scene})\n    ${t.prompt}`).join('\n\n');
+  const albumWorkspace = data ? (data.workspace || `Awen · ${data.album}`) : '';
+  const trackRecipe = (tr) => normalizeSunoRecipe(tr.sunoRecipe, {
+    lyrics: tr.lyrics,
+    style: tr.style || data?.anchor,
+    exclude: tr.exclude,
+    title: tr.title,
+    workspace: albumWorkspace,
+  });
+  const albumDurationSec = data?.tracks?.reduce((sum, tr) => sum + trackRecipe(tr).durationSec, 0) || 0;
   const copyAll = data &&
 `=== AWEN STUDY · ALBUM ===
 ${data.album}
@@ -3083,11 +3357,11 @@ ${data.concept}
 [ABOUT]
 ${data.description || ''}
 
-[LYRICS]  → paste into Suno's Lyrics box on EVERY track (Instrumental ON)
-${A.V5_LYRICS}
+[SAVE TO WORKSPACE]
+${albumWorkspace}
 
-[STYLE OF MUSIC]  → paste into Suno's Style box on EVERY track
-${data.anchor}
+[SUNO TRACK RECIPES]
+${data.tracks.map((tr, i) => `--- ${String(i + 1).padStart(2, '0')} · ${tr.title} ---\n${sunoRecipeChecklist(trackRecipe(tr))}`).join('\n\n')}
 
 [COVER PROMPT]  → cover art (1:1)
 ${data.cover}
@@ -3107,7 +3381,7 @@ Core Texture: ${data.dna ? data.dna.texture : ''}
 Core Space: ${data.dna ? data.dna.space : ''}
 Core Emotion: ${data.dna ? data.dna.emotion : ''}
 
-[TRACKLIST]  → set Instrumental ON; each track's Description = its line below
+[TRACKLIST]
 ${fullTracklist}
 ${(() => { const meta = A.metadataGen(data, album.base||{}); return `
 [YOUTUBE DESCRIPTION]
@@ -3119,17 +3393,7 @@ ${meta.spotifyDesc}
 [TAGS]
 ${meta.tags.join(', ')}`; })()}`;
 
-  // Per-track Suno copy: V5 mandatory order — LYRICS first, STYLE second.
-  const trackSuno = (tr) =>
-`=== ${data.album} · ${tr.title} ===
-[LYRICS]  → Suno「Lyrics」框（开 Instrumental）
-${tr.lyrics || ''}
-
-[STYLE]  → Suno「Style of Music」框
-${tr.style || data.anchor}
-
-[TITLE]  → Suno 标题
-${tr.title}`;
+  const trackSuno = (tr) => `=== ${data.album} · ${tr.title} ===\n${sunoRecipeChecklist(trackRecipe(tr))}`;
 
   return (
     <div className="album">
@@ -3152,7 +3416,7 @@ ${tr.title}`;
               </Tooltip>
               {onStar && !album.generating && album.data && (
                 <button type="button" className={"star-btn" + (album.starred ? " starred" : "")}
-                  title={album.starred ? "已收藏到 GitHub 曲库" : "收藏到 GitHub 曲库"}
+                  title={album.starred ? "已收藏到曲库" : "收藏到曲库（本地优先）"}
                   onClick={() => onStar(album)}>⭐</button>
               )}
               <button type="button" className={"icon-btn" + (album.pinned ? " on" : "")} title={album.pinned ? "已锁定 — 点击解锁" : "锁定 (防误删)"} onClick={() => { if (album.pinned) { if (window.confirm('确认解锁？解锁后此专辑可被删除。')) onPin(album.id); } else { onPin(album.id); } }} style={album.pinned ? {background:"var(--accent)",borderColor:"var(--accent)",color:"var(--accent-ink)",fontSize:"13px"} : {fontSize:"13px"}}>{album.pinned ? '🔒' : '🔓'}</button>
@@ -3166,10 +3430,12 @@ ${tr.title}`;
             <>
               <div className="album-title">{data.album}</div>
               <div className="album-concept">{data.concept}</div>
-              {(data.sceneLabel || data.bpm) && (
+              {(data.sceneLabel || data.bpm || (data.tracks && data.tracks.length)) && (
                 <div className="album-scene-row">
                   {data.sceneLabel && <span className="album-scene-chip">🎬 {data.sceneLabel}</span>}
-                  {data.bpm && <span className="album-scene-chip">{data.bpm} BPM · {data.tracks ? data.tracks.length : 0} tracks · ≈ {Math.round((data.tracks?data.tracks.length:0)*5)}–{Math.round((data.tracks?data.tracks.length:0)*6)} min</span>}
+                  {data.tracks && <span className="album-scene-chip">
+                    {data.bpm ? `${data.bpm} BPM · ` : ''}{data.tracks.length} {zh ? '首' : 'tracks'} · {zh ? '预计总时长 ' : 'estimated total '}{sunoDurationLabel(albumDurationSec)}
+                  </span>}
                 </div>
               )}
               {data.atmosphere && (
@@ -3217,38 +3483,43 @@ ${tr.title}`;
                 </div>
                 <div className="kv"><span className="v mono">{data.anchor}</span></div>
               </div>
-              <div className="block">
-                <div className="block-head">
-                  <div className="block-labels">
-                    <span className="block-label"><Icon name="image" size={12} /> COVER PROMPT</span>
-                    <span className="field-hint">{T('coverHint')}</span>
-                  </div>
-                  <CopyBtn text={data.cover} />
-                </div>
-                <div className="kv"><span className="v">{data.cover}</span></div>
-              </div>
-              <div className="block">
-                <div className="block-head">
-                  <div className="block-labels">
-                    <span className="block-label"><Icon name="play" size={12} /> VIDEO PROMPT</span>
-                    <span className="field-hint">{T('videoHint')}</span>
-                  </div>
-                  <CopyBtn text={data.video || data.cover} />
-                </div>
-                <div className="kv"><span className="v">{data.video || data.cover}</span></div>
-              </div>
-              {data.thumb && (
-                <div className="block">
-                  <div className="block-head">
-                    <div className="block-labels">
-                      <span className="block-label"><Icon name="image" size={12} /> {T('thumbLabel')}</span>
-                      <span className="field-hint">{T('thumbHint')}</span>
+              <details className="suno-asset-fold">
+                <summary>视觉发布素材 · Cover / Video / Thumbnail</summary>
+                <div className="suno-asset-body">
+                  <div className="block">
+                    <div className="block-head">
+                      <div className="block-labels">
+                        <span className="block-label"><Icon name="image" size={12} /> COVER PROMPT</span>
+                        <span className="field-hint">{T('coverHint')}</span>
+                      </div>
+                      <CopyBtn text={data.cover} />
                     </div>
-                    <CopyBtn text={data.thumb} />
+                    <div className="kv"><span className="v">{data.cover}</span></div>
                   </div>
-                  <div className="kv"><span className="v">{data.thumb}</span></div>
+                  <div className="block">
+                    <div className="block-head">
+                      <div className="block-labels">
+                        <span className="block-label"><Icon name="play" size={12} /> VIDEO PROMPT</span>
+                        <span className="field-hint">{T('videoHint')}</span>
+                      </div>
+                      <CopyBtn text={data.video || data.cover} />
+                    </div>
+                    <div className="kv"><span className="v">{data.video || data.cover}</span></div>
+                  </div>
+                  {data.thumb && (
+                    <div className="block">
+                      <div className="block-head">
+                        <div className="block-labels">
+                          <span className="block-label"><Icon name="image" size={12} /> {T('thumbLabel')}</span>
+                          <span className="field-hint">{T('thumbHint')}</span>
+                        </div>
+                        <CopyBtn text={data.thumb} />
+                      </div>
+                      <div className="kv"><span className="v">{data.thumb}</span></div>
+                    </div>
+                  )}
                 </div>
-              )}
+              </details>
             </>
           )}
         </div>
@@ -3281,12 +3552,11 @@ ${tr.title}`;
                   )}
                   <span className="track-scene">{tr.scene}</span>
                 </div>
+                <details className="track-suno-fold">
+                  <summary>Suno 配方 · {trackRecipe(tr).weirdness}% / {trackRecipe(tr).styleInfluence}% / {sunoDurationLabel(trackRecipe(tr).durationSec)} · {trackRecipe(tr).workspace}</summary>
+                  <SunoBridgePanel recipe={trackRecipe(tr)} compact />
+                </details>
                 <div className="track-prompt">{tr.prompt}</div>
-                {tr.lyrics && (
-                  <div className="track-structure" style={{fontFamily:'var(--font-mono)',fontSize:10,color:'var(--ink-faint)',whiteSpace:'pre-wrap',marginTop:5,lineHeight:1.55,borderLeft:'2px solid var(--accent)',paddingLeft:8}}>
-                    {tr.lyrics}
-                  </div>
-                )}
               </div>
               <CopyBtn text={trackSuno(tr)} label="Suno" />
             </div>
@@ -3294,66 +3564,60 @@ ${tr.title}`;
         </div>
       )}
 
-      {/* Metadata Generator block — memoized, recomputes only when album data changes */}
-      {data && data.tracks && metaMemo && (
-        <div className="meta-block">
-            <div className="tracklist-head">
-              <span className="block-label">{T('metaLabel')}</span>
-            </div>
-            <div className="block">
-              <div className="block-head">
-                <div className="block-labels">
-                  <span className="block-label"><Icon name="image" size={12} /> {T('metaYt')}</span>
-                </div>
-                <CopyBtn text={metaMemo.ytDesc} />
-              </div>
-              <div className="kv"><span className="v" style={{whiteSpace:'pre-wrap'}}>{metaMemo.ytDesc}</span></div>
-            </div>
-            <div className="block">
-              <div className="block-head">
-                <div className="block-labels">
-                  <span className="block-label"><Icon name="image" size={12} /> {T('metaSpotify')}</span>
-                </div>
-                <CopyBtn text={metaMemo.spotifyDesc} />
-              </div>
-              <div className="kv"><span className="v" style={{whiteSpace:'pre-wrap'}}>{metaMemo.spotifyDesc}</span></div>
-            </div>
-            <div className="block">
-              <div className="block-head">
-                <div className="block-labels">
-                  <span className="block-label">{T('metaTags')}</span>
-                </div>
-                <CopyBtn text={metaMemo.tags.join(', ')} />
-              </div>
-              <div className="kv"><span className="v">{metaMemo.tags.join(' · ')}</span></div>
-            </div>
-          </div>
-      )}
-
-      {/* publishing helpers for album */}
       {data && data.tracks && (
-        <div className="publish-helper">
-          <div className="block">
-            <div className="block-head">
-              <div className="block-labels">
-                <span className="block-label"><Icon name="play" size={12} /> YouTube 专辑标题</span>
-                <span className="field-hint">集数自动递增</span>
+        <details className="suno-asset-fold">
+          <summary>发布元数据 · YouTube / Spotify / Tags / 文件名</summary>
+          <div className="suno-asset-body">
+            {metaMemo && (
+              <div className="meta-block">
+                <div className="tracklist-head"><span className="block-label">{T('metaLabel')}</span></div>
+                <div className="block">
+                  <div className="block-head">
+                    <div className="block-labels"><span className="block-label"><Icon name="image" size={12} /> {T('metaYt')}</span></div>
+                    <CopyBtn text={metaMemo.ytDesc} />
+                  </div>
+                  <div className="kv"><span className="v" style={{whiteSpace:'pre-wrap'}}>{metaMemo.ytDesc}</span></div>
+                </div>
+                <div className="block">
+                  <div className="block-head">
+                    <div className="block-labels"><span className="block-label"><Icon name="image" size={12} /> {T('metaSpotify')}</span></div>
+                    <CopyBtn text={metaMemo.spotifyDesc} />
+                  </div>
+                  <div className="kv"><span className="v" style={{whiteSpace:'pre-wrap'}}>{metaMemo.spotifyDesc}</span></div>
+                </div>
+                <div className="block">
+                  <div className="block-head">
+                    <div className="block-labels"><span className="block-label">{T('metaTags')}</span></div>
+                    <CopyBtn text={metaMemo.tags.join(', ')} />
+                  </div>
+                  <div className="kv"><span className="v">{metaMemo.tags.join(' · ')}</span></div>
+                </div>
               </div>
-              <CopyBtn text={A.albumYouTubeTitle(album)} />
-            </div>
-            <div className="kv"><span className="v">{A.albumYouTubeTitle(album)}</span></div>
-          </div>
-          <div className="block">
-            <div className="block-head">
-              <div className="block-labels">
-                <span className="block-label"><Icon name="play" size={12} /> 专辑曲目文件名</span>
-                <span className="field-hint">所有曲目的统一命名,逐行复制</span>
+            )}
+            <div className="publish-helper">
+              <div className="block">
+                <div className="block-head">
+                  <div className="block-labels">
+                    <span className="block-label"><Icon name="play" size={12} /> YouTube 专辑标题</span>
+                    <span className="field-hint">集数自动递增</span>
+                  </div>
+                  <CopyBtn text={A.albumYouTubeTitle(album)} />
+                </div>
+                <div className="kv"><span className="v">{A.albumYouTubeTitle(album)}</span></div>
               </div>
-              <CopyBtn text={data.tracks.map((t,i)=>A.albumTrackFileName(album,i,t)+'.wav').join('\n')} />
+              <div className="block">
+                <div className="block-head">
+                  <div className="block-labels">
+                    <span className="block-label"><Icon name="play" size={12} /> 专辑曲目文件名</span>
+                    <span className="field-hint">所有曲目的统一命名，逐行复制</span>
+                  </div>
+                  <CopyBtn text={data.tracks.map((t,i)=>A.albumTrackFileName(album,i,t)+'.wav').join('\n')} />
+                </div>
+                <div className="kv"><span className="v" style={{fontFamily:'var(--font-mono)',whiteSpace:'pre-wrap',fontSize:11}}>{data.tracks.map((t,i)=>A.albumTrackFileName(album,i,t)+'.wav').join('\n')}</span></div>
+              </div>
             </div>
-            <div className="kv"><span className="v" style={{fontFamily:'var(--font-mono)',whiteSpace:'pre-wrap',fontSize:11}}>{data.tracks.map((t,i)=>A.albumTrackFileName(album,i,t)+'.wav').join('\n')}</span></div>
           </div>
-        </div>
+        </details>
       )}
     </div>
   );
@@ -3712,15 +3976,127 @@ const MODE_INFO = {
   shuffle: { label: 'Shuffle', zh: '锁定满意的维度，摇号生成其余（老虎机式）' },
   decompose: { label: 'Decompose', zh: '从导入的参考曲拆解出发，逐项变异 remix' },
   album: { label: 'Album', zh: '锁定声音身份，沿一条行进轴一次铺出整张专辑' },
-  library: { label: '⭐ 曲库', zh: '收藏的好歌，永久保存在 GitHub' },
+  library: { label: '⭐ 曲库', zh: '收藏先保存在本机，可选同步到 GitHub' },
 };
 
 function loadState() {
   try {return JSON.parse(localStorage.getItem(STORE_KEY)) || null;} catch (e) {return null;}
 }
 
+/* ========== AI PROVIDER CONFIG ========== */
+const AI_PROVIDER_STORE_KEY = 'awen_ai_provider_v1';
+const GH_REPO_DEFAULT = 'awenstudio/product-awen-music';
+
+function normalizeGitHubRepo(value) {
+  const repo = String(value || '').trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '');
+  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) ? repo : '';
+}
+
+const AI_PROVIDER_PRESETS = {
+  'mimo': {
+    label: 'MiMo', protocol: 'chat-completions',
+    baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1/chat/completions', model: 'mimo-v2.5-pro'
+  },
+  'opencode-go-chat': {
+    label: 'OpenCode Go · GLM-5.3', protocol: 'chat-completions',
+    baseUrl: 'https://opencode.ai/zen/go/v1/chat/completions', model: 'glm-5.3'
+  },
+  'opencode-go-mimo': {
+    label: 'OpenCode Go · MiMo-V2.5-Pro', protocol: 'chat-completions',
+    baseUrl: 'https://opencode.ai/zen/go/v1/chat/completions', model: 'mimo-v2.5-pro'
+  },
+  'opencode-go-deepseek-v4-pro': {
+    label: 'OpenCode Go · DeepSeek V4 Pro', protocol: 'chat-completions',
+    baseUrl: 'https://opencode.ai/zen/go/v1/chat/completions', model: 'deepseek-v4-pro'
+  },
+  'opencode-go-responses': {
+    label: 'OpenCode Go · GPT-5.6 Luna', protocol: 'responses',
+    baseUrl: 'https://opencode.ai/zen/go/v1/responses', model: 'gpt-5.6-luna'
+  },
+  'custom': {
+    label: '自定义 / 中转站', protocol: 'chat-completions', baseUrl: '', model: ''
+  },
+};
+
+function loadAIProviderConfig() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(AI_PROVIDER_STORE_KEY) || 'null');
+    if (saved && saved.baseUrl && saved.model) {
+      const preset = AI_PROVIDER_PRESETS[saved.preset] || AI_PROVIDER_PRESETS.custom;
+      // Named OpenCode Go presets are intentionally canonical. Older builds
+      // allowed URL/protocol/model drift while keeping the official label.
+      if (String(saved.preset || '').startsWith('opencode-go-')) {
+        return { preset: saved.preset, ...preset, apiKey: String(saved.apiKey || '') };
+      }
+      return { ...preset, ...saved };
+    }
+  } catch (e) {}
+  // One-time compatibility with the original MiMo-only build.
+  let legacyKey = '';
+  try { legacyKey = localStorage.getItem('mimo_api_key') || ''; } catch (e) {}
+  return { preset: 'mimo', ...AI_PROVIDER_PRESETS.mimo, apiKey: legacyKey };
+}
+
+function saveAIProviderConfig(config) {
+  const clean = {
+    preset: config.preset || 'custom',
+    label: String(config.label || 'Custom Provider').trim(),
+    protocol: config.protocol === 'responses' ? 'responses' : 'chat-completions',
+    baseUrl: String(config.baseUrl || '').trim().replace(/\/+$/, ''),
+    model: String(config.model || '').trim(),
+    apiKey: String(config.apiKey || '').trim(),
+  };
+  try { localStorage.setItem(AI_PROVIDER_STORE_KEY, JSON.stringify(clean)); } catch (e) {}
+  return clean;
+}
+
+function providerEndpoint(config) {
+  const base = String(config.baseUrl || '').trim().replace(/\/+$/, '');
+  if (!base) return '';
+  if (config.protocol === 'responses') {
+    return /\/responses$/i.test(base) ? base : `${base}/responses`;
+  }
+  return /\/chat\/completions$/i.test(base) ? base : `${base}/chat/completions`;
+}
+
+function providerCredentialScope(providerId) {
+  return String(providerId || '').startsWith('opencode-go-') ? 'opencode-go' : String(providerId || 'custom');
+}
+
+function providerErrorSummary(response, body) {
+  const raw = String(body || '').trim();
+  const contentType = String(response?.headers?.get('content-type') || '').toLowerCase();
+  if (contentType.includes('text/html') || /^<!doctype html/i.test(raw) || /^<html/i.test(raw)) {
+    return window.I18N.isZh()
+      ? '上游返回了 HTML 页面，通常表示该模型路由暂时不可用'
+      : 'The upstream returned HTML, which usually means the model route is temporarily unavailable';
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    const message = parsed?.error?.message || parsed?.error || parsed?.message;
+    if (typeof message === 'string' && message.trim()) return message.trim().slice(0, 240);
+  } catch (e) {}
+  const plain = raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  return plain.slice(0, 240) || (window.I18N.isZh() ? '服务商未返回错误详情' : 'No error details returned');
+}
+
+function providerPayload(config, prompt) {
+  if (config.protocol === 'responses') return { model: config.model, input: prompt };
+  const payload = { model: config.model, messages: [{ role: 'user', content: prompt }] };
+  // DeepSeek V4 Pro may otherwise return JSON-looking text with an
+  // unterminated final string. Ask the OpenAI-compatible endpoint for strict
+  // JSON and leave enough output room for the full Awen prompt package.
+  if (config.preset === 'opencode-go-deepseek-v4-pro') {
+    payload.response_format = { type: 'json_object' };
+    payload.max_tokens = 8192;
+    payload.thinking = { type: 'disabled' };
+    payload.temperature = 0.35;
+  }
+  return payload;
+}
+
 /* ========== TOKEN MODAL ========== */
-function TokenModal({ open, onSubmit, onCancel }) {
+function TokenModal({ open, onSubmit, onCancel, providerLabel }) {
   const [val, setVal] = React.useState('');
   const [show, setShow] = React.useState(false);
   const inputRef = React.useRef(null);
@@ -3748,12 +4124,16 @@ function TokenModal({ open, onSubmit, onCancel }) {
   return (
     <div className="modal-back" onClick={onCancel} role="dialog" aria-modal="true">
       <div className="modal-card" onClick={e => e.stopPropagation()}>
-        <div className="modal-h">{T('tokenTitle')}</div>
-        <div className="modal-sub">{T('tokenSub')}</div>
+        <div className="modal-h">{window.I18N.isZh() ? '输入 API Key' : 'Enter API Key'}</div>
+        <div className="modal-sub">
+          {window.I18N.isZh()
+            ? `当前 Provider：${providerLabel || 'MiMo'}。Key 只保存在本机浏览器。`
+            : `Current provider: ${providerLabel || 'MiMo'}. The key stays in this browser.`}
+        </div>
         <div className="modal-pw-row">
           <input ref={inputRef} type={show ? 'text' : 'password'}
             className="modal-pw-input" value={val}
-            placeholder={T('tokenPlaceholder')}
+            placeholder="sk-... / tp-..."
             onChange={e => setVal(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && submit()}
             autoComplete="current-password" />
@@ -3773,20 +4153,110 @@ function TokenModal({ open, onSubmit, onCancel }) {
 }
 
 /* ========== SETTINGS MODAL ========== */
-function SettingsModal({ open, onClose, onMimoSaved }) {
-  const [mimoVal, setMimoVal] = React.useState('');
+function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDefaultsSaved }) {
+  const [providerId, setProviderId] = React.useState('mimo');
+  const [providerLabel, setProviderLabel] = React.useState('MiMo');
+  const [protocol, setProtocol] = React.useState('chat-completions');
+  const [baseUrl, setBaseUrl] = React.useState('');
+  const [model, setModel] = React.useState('');
+  const [apiKeyVal, setApiKeyVal] = React.useState('');
+  const [providerError, setProviderError] = React.useState('');
   const [patVal, setPatVal] = React.useState('');
+  const [repoVal, setRepoVal] = React.useState(GH_REPO_DEFAULT);
+  const [patError, setPatError] = React.useState('');
+  const [sunoRoute, setSunoRoute] = React.useState(SUNO_RECIPE_DEFAULTS.lyricsRoute);
+  const [sunoWeirdness, setSunoWeirdness] = React.useState(SUNO_RECIPE_DEFAULTS.weirdness);
+  const [sunoStyleInfluence, setSunoStyleInfluence] = React.useState(SUNO_RECIPE_DEFAULTS.styleInfluence);
+  const [sunoDuration, setSunoDuration] = React.useState(SUNO_RECIPE_DEFAULTS.durationSec);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const cfg = loadAIProviderConfig();
+    setProviderId(cfg.preset || 'custom');
+    setProviderLabel(cfg.label || 'Custom Provider');
+    setProtocol(cfg.protocol || 'chat-completions');
+    setBaseUrl(cfg.baseUrl || '');
+    setModel(cfg.model || '');
+    setApiKeyVal('');
+    setProviderError('');
+    setRepoVal(localStorage.getItem('github_repo') || GH_REPO_DEFAULT);
+    setPatError('');
+    const sd = normalizeSunoDefaults(sunoDefaults || loadSunoDefaults());
+    setSunoRoute(sd.lyricsRoute);
+    setSunoWeirdness(sd.weirdness);
+    setSunoStyleInfluence(sd.styleInfluence);
+    setSunoDuration(sd.durationSec);
+  }, [open, sunoDefaults]);
+
   if (!open) return null;
-  const currentMimo = localStorage.getItem('mimo_api_key') || '';
+  const currentProvider = loadAIProviderConfig();
   const currentPat = localStorage.getItem('github_pat') || '';
-  function saveMimo() {
-    const v = mimoVal.trim(); if (!v) return;
-    localStorage.setItem('mimo_api_key', v); setMimoVal('');
-    if (onMimoSaved) onMimoSaved(true);
+  const currentRepo = normalizeGitHubRepo(localStorage.getItem('github_repo')) || GH_REPO_DEFAULT;
+  const isOfficialPreset = providerId !== 'custom';
+
+  function chooseProvider(id) {
+    const p = AI_PROVIDER_PRESETS[id] || AI_PROVIDER_PRESETS.custom;
+    setProviderId(id);
+    setProviderLabel(p.label);
+    setProtocol(p.protocol);
+    setBaseUrl(p.baseUrl);
+    setModel(p.model);
+    setApiKeyVal('');
+    setProviderError('');
+  }
+
+  function saveProvider() {
+    const endpoint = providerEndpoint({ baseUrl, protocol });
+    if (!endpoint || !model.trim()) {
+      setProviderError('请填写 API Base URL 与模型名。');
+      return;
+    }
+    try {
+      const u = new URL(endpoint);
+      const loopback = ['127.0.0.1', 'localhost', '::1'].includes(u.hostname);
+      if (u.protocol !== 'https:' && !(u.protocol === 'http:' && loopback)) {
+        setProviderError('远程 API 必须使用 HTTPS；HTTP 只允许本机 localhost。');
+        return;
+      }
+    } catch (e) {
+      setProviderError('API Base URL 格式无效。');
+      return;
+    }
+    const keepExistingKey = providerCredentialScope(currentProvider.preset) === providerCredentialScope(providerId)
+      ? currentProvider.apiKey
+      : '';
+    const cfg = saveAIProviderConfig({
+      preset: providerId,
+      label: providerLabel || (AI_PROVIDER_PRESETS[providerId]?.label) || 'Custom Provider',
+      protocol, baseUrl, model,
+      apiKey: apiKeyVal.trim() || keepExistingKey,
+    });
+    setApiKeyVal('');
+    setProviderError('');
+    if (onProviderSaved) onProviderSaved(cfg);
+  }
+
+  function clearProviderKey() {
+    const cfg = saveAIProviderConfig({ ...loadAIProviderConfig(), apiKey: '' });
+    setApiKeyVal('');
+    if (onProviderSaved) onProviderSaved(cfg);
   }
   function savePat() {
-    const v = patVal.trim(); if (!v) return;
-    localStorage.setItem('github_pat', v); setPatVal('');
+    const repo = normalizeGitHubRepo(repoVal);
+    if (!repo) { setPatError('目标仓库格式应为 owner/repo。'); return; }
+    const v = patVal.trim();
+    if (v) localStorage.setItem('github_pat', v);
+    localStorage.setItem('github_repo', repo);
+    setRepoVal(repo); setPatVal(''); setPatError('');
+  }
+  function saveSuno() {
+    const clean = saveSunoDefaults({
+      lyricsRoute: sunoRoute,
+      weirdness: sunoWeirdness,
+      styleInfluence: sunoStyleInfluence,
+      durationSec: sunoDuration,
+    });
+    if (onSunoDefaultsSaved) onSunoDefaultsSaved(clean);
   }
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -3798,23 +4268,110 @@ function SettingsModal({ open, onClose, onMimoSaved }) {
         <div className="modal-body">
           <div className="settings-section">
             <div className="settings-row">
-              <span className="settings-label">MiMo API Key</span>
-              {currentMimo && <span className="settings-stored">已存储: ···{currentMimo.slice(-6)}</span>}
-              <input className="settings-input" type="password" value={mimoVal}
-                placeholder="tp-xxxx..." onChange={e => setMimoVal(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && saveMimo()} />
-              <button className="settings-save-btn" onClick={saveMimo} disabled={!mimoVal.trim()}>保存 MiMo Key</button>
+              <span className="settings-label">AI Provider <span className="settings-hint">OpenAI-compatible</span></span>
+              <div className="settings-grid">
+                <label className="settings-field full">
+                  <span className="settings-hint">预设</span>
+                  <select className="settings-input" value={providerId} onChange={e => chooseProvider(e.target.value)}>
+                    {Object.entries(AI_PROVIDER_PRESETS).map(([id, p]) => <option key={id} value={id}>{p.label}</option>)}
+                  </select>
+                </label>
+                <label className="settings-field">
+                  <span className="settings-hint">协议</span>
+                  <select className="settings-input" value={protocol} disabled={isOfficialPreset}
+                    onChange={e => setProtocol(e.target.value)}>
+                    <option value="chat-completions">Chat Completions</option>
+                    <option value="responses">Responses API</option>
+                  </select>
+                </label>
+                <label className="settings-field">
+                  <span className="settings-hint">模型名</span>
+                  <input className="settings-input" value={model} placeholder="model-id"
+                    readOnly={isOfficialPreset}
+                    onChange={e => setModel(e.target.value)} />
+                </label>
+                <label className="settings-field full">
+                  <span className="settings-hint">API Base URL（可填 /v1 或完整 endpoint）</span>
+                  <input className="settings-input" value={baseUrl} placeholder="https://api.example.com/v1"
+                    readOnly={isOfficialPreset}
+                    onChange={e => setBaseUrl(e.target.value)} />
+                </label>
+                <label className="settings-field full">
+                  <span className="settings-hint">Provider 显示名称</span>
+                  <input className="settings-input" value={providerLabel} placeholder="My Relay"
+                    readOnly={isOfficialPreset}
+                    onChange={e => setProviderLabel(e.target.value)} />
+                </label>
+                {isOfficialPreset && (
+                  <div className="settings-hint" style={{gridColumn:'1 / -1'}}>
+                    官方预设的协议、模型与地址会自动校准；需要修改时请选择“自定义 / 中转站”。
+                  </div>
+                )}
+                <label className="settings-field full">
+                  <span className="settings-hint">API Key（留空会保留当前 Provider 已存的 Key）</span>
+                  {currentProvider.apiKey && <span className="settings-stored">已存储: ···{currentProvider.apiKey.slice(-6)}</span>}
+                  <input className="settings-input" type="password" value={apiKeyVal}
+                    placeholder="sk-... / tp-..." onChange={e => setApiKeyVal(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && saveProvider()} />
+                </label>
+              </div>
+              {providerError && <div className="settings-error">{providerError}</div>}
+              <div className="settings-actions">
+                <button className="settings-save-btn" onClick={saveProvider}>保存 Provider 配置</button>
+                {currentProvider.apiKey && <button className="settings-clear-btn" onClick={clearProviderKey}>清除当前 Key</button>}
+              </div>
+              <p className="settings-note">
+                本地启动器会通过 <b>127.0.0.1</b> 代理请求，解决多数 API 的浏览器 CORS 限制；
+                Key 只存于当前浏览器，并仅在生成时转发给你选择的 Provider。
+              </p>
             </div>
             <hr className="settings-divider" />
             <div className="settings-row">
-              <span className="settings-label">GitHub PAT <span className="settings-hint">用于收藏歌曲写入 GitHub</span></span>
+              <span className="settings-label">Suno 默认设置 <span className="settings-hint">所有新生成曲目共享；旧曲目保留快照</span></span>
+              <label className="settings-field full">
+                <span className="settings-hint">默认 Lyrics 路线</span>
+                <select className="settings-input" value={sunoRoute} onChange={e => setSunoRoute(e.target.value)}>
+                  <option value="structure-prompt">结构实验 · Prompt</option>
+                  <option value="instrumental">纯音乐稳定 · Instrumental</option>
+                </select>
+              </label>
+              <label className="settings-field full">
+                <span className="settings-range-label"><span>Weirdness · Safe ↔ Chaos</span><b>{sunoWeirdness}%</b></span>
+                <input className="settings-range" type="range" min="0" max="100" step="5" value={sunoWeirdness}
+                  onChange={e => setSunoWeirdness(Number(e.target.value))} />
+              </label>
+              <label className="settings-field full">
+                <span className="settings-range-label"><span>Style Influence · Loose ↔ Strong</span><b>{sunoStyleInfluence}%</b></span>
+                <input className="settings-range" type="range" min="0" max="100" step="5" value={sunoStyleInfluence}
+                  onChange={e => setSunoStyleInfluence(Number(e.target.value))} />
+              </label>
+              <label className="settings-field full">
+                <span className="settings-range-label"><span>Duration</span><b>{sunoDurationLabel(sunoDuration)}</b></span>
+                <input className="settings-range" type="range" min="120" max="600" step="15" value={sunoDuration}
+                  onChange={e => setSunoDuration(Number(e.target.value))} />
+              </label>
+              <button className="settings-save-btn" onClick={saveSuno}>保存 Suno 默认设置</button>
+              <p className="settings-note">
+                Workspace 不在这里固定：单曲使用 <b>Awen · Singles</b>；专辑自动建议 <b>Awen · 专辑名</b>。
+              </p>
+            </div>
+            <hr className="settings-divider" />
+            <div className="settings-row">
+              <span className="settings-label">GitHub 同步 <span className="settings-hint">可选；收藏始终先保存在本机</span></span>
+              <label className="settings-field full">
+                <span className="settings-hint">目标仓库（可填写你自己的 fork）</span>
+                <input className="settings-input" value={repoVal} placeholder="owner/repo"
+                  onChange={e => { setRepoVal(e.target.value); setPatError(''); }} />
+              </label>
               {currentPat && <span className="settings-stored">已存储: ···{currentPat.slice(-6)}</span>}
               <input className="settings-input" type="password" value={patVal}
                 placeholder="github_pat_xxxx..." onChange={e => setPatVal(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && savePat()} />
-              <button className="settings-save-btn" onClick={savePat} disabled={!patVal.trim()}>保存 GitHub PAT</button>
+              {patError && <div className="settings-error">{patError}</div>}
+              <button className="settings-save-btn" onClick={savePat} disabled={!normalizeGitHubRepo(repoVal)}>保存 GitHub 同步配置</button>
               <p className="settings-note">
-                需要 <b>awenstudio/product-awen-music</b> 仓库的 Contents: Write 权限<br/>
+                当前目标：<b>{currentRepo}</b>。Fine-grained PAT 必须选中同一个 Resource owner 与仓库，
+                并授予 <b>Contents: Read and write</b>；组织仓库还可能需要管理员批准。<br/>
                 <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">
                   去 GitHub 生成 Fine-grained PAT →
                 </a>
@@ -3860,12 +4417,15 @@ function App() {
   const [activeUniverseId, setActiveUniverseId] = React.useState(null);
   const [toasts, setToasts] = React.useState([]);
   const [tokenModalOpen, setTokenModalOpen] = React.useState(false);
-  const [hasKey, setHasKey] = React.useState(() => !!localStorage.getItem('mimo_api_key'));
+  const [providerConfig, setProviderConfig] = React.useState(() => loadAIProviderConfig());
+  const [hasKey, setHasKey] = React.useState(() => !!loadAIProviderConfig().apiKey);
+  const [sunoDefaults, setSunoDefaults] = React.useState(() => loadSunoDefaults());
   const [bannerVal, setBannerVal] = React.useState('');
   function saveBannerKey() {
     const v = bannerVal.trim();
     if (!v) return;
-    localStorage.setItem('mimo_api_key', v);
+    const cfg = saveAIProviderConfig({ ...loadAIProviderConfig(), apiKey: v });
+    setProviderConfig(cfg);
     setHasKey(true);
     setBannerVal('');
     if (window.__awen_resolveToken) window.__awen_resolveToken(v);
@@ -3894,8 +4454,10 @@ function App() {
   function handleToastAction(t) { if (t.action) t.action(); dismissToast(t.id); }
   const [sel, setSel] = React.useState(saved?.sel ? { ...A.DEFAULTS, ...saved.sel } : { ...A.DEFAULTS });
   const [locks, setLocks] = React.useState(saved?.locks || {});
-  const [songs, setSongs] = React.useState(saved?.songs || []);
-  const [albums, setAlbums] = React.useState(saved?.albums || []);
+  const [songs, setSongs] = React.useState(() => (saved?.songs || []).map(song =>
+    song.ai ? { ...song, ai: attachSongSunoRecipe(song.ai, sunoDefaults) } : song));
+  const [albums, setAlbums] = React.useState(() => (saved?.albums || []).map(album =>
+    album.data ? { ...album, data: attachAlbumSunoRecipes(album.data, sunoDefaults) } : album));
   const [axisKey, setAxisKey] = React.useState(saved?.axisKey || 'day');
   const [trackCount, setTrackCount] = React.useState(saved?.trackCount || 8);
   // V3 Scene-mode selections
@@ -3969,10 +4531,9 @@ function App() {
     }, 55);
   }
 
-  // Direct MiMo API — calls xiaomimimo.com from the browser (CORS allowed).
-  // API key is entered once via modal and stored in localStorage.
-  const MIMO_URL   = 'https://token-plan-cn.xiaomimimo.com/v1/chat/completions';
-  const MIMO_MODEL = 'mimo-v2.5-pro';
+  // Generic OpenAI-compatible provider. Local runs use server.py as a same-origin
+  // proxy so providers that do not expose browser CORS (including OpenCode Go)
+  // still work without putting API keys in the repository.
   const API_TIMEOUT_MS = 180000;
 
   // Safe localStorage wrappers — Safari private mode / quota errors will not crash the app.
@@ -3983,8 +4544,53 @@ function App() {
   };
 
   // GitHub library helpers
-  const GH_REPO = 'awenstudio/product-awen-music';
+  const LOCAL_LIB_KEY = 'awen_local_library_v1';
   const GH_LIB_PATH = 'docs/library.json';
+  function getGitHubRepo() {
+    return normalizeGitHubRepo(safeLS.get('github_repo')) || GH_REPO_DEFAULT;
+  }
+  function hydrateLibraryItem(item) {
+    if (!item || !item.id) return item;
+    if (item.type === 'song' || item.sel) {
+      let recipe = item.sunoRecipe;
+      if (!recipe && item.sel) {
+        const fallback = A.fallbackPrompt(item.sel);
+        recipe = buildSunoRecipe(fallback.suno, item.title || fallback.title, 'Awen · Singles', SUNO_RECIPE_DEFAULTS);
+      }
+      return { ...item, type: 'song', sunoRecipe: normalizeSunoRecipe(recipe, {
+        title: item.title,
+        workspace: 'Awen · Singles',
+      }) };
+    }
+    const workspace = item.workspace || `Awen · ${item.title || 'Untitled Album'}`;
+    const recipes = Array.isArray(item.sunoRecipes)
+      ? item.sunoRecipes.map(recipe => normalizeSunoRecipe(recipe, { workspace }))
+      : [];
+    return { ...item, type: 'album', workspace, sunoRecipes: recipes };
+  }
+  function readLocalLibrary() {
+    try {
+      const parsed = JSON.parse(safeLS.get(LOCAL_LIB_KEY) || 'null');
+      return Array.isArray(parsed?.songs) ? parsed.songs.map(hydrateLibraryItem).filter(Boolean) : [];
+    } catch (e) { return []; }
+  }
+  function writeLocalLibrary(items) {
+    return safeLS.set(LOCAL_LIB_KEY, JSON.stringify({ version: 2, songs: items.map(hydrateLibraryItem) }));
+  }
+  function mergeLibraryItems(remoteItems, localItems) {
+    const merged = new Map();
+    [...(remoteItems || []), ...(localItems || [])].forEach(item => {
+      if (item?.id) merged.set(item.id, item);
+    });
+    return [...merged.values()].sort((a, b) => String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
+  }
+  function githubSyncMessage(error) {
+    const repo = getGitHubRepo();
+    if (error?.status === 403) {
+      return `GitHub 无权写入 ${repo}。请让 PAT 选中该仓库并授予 Contents: Read and write；组织仓库可能还需管理员批准。`;
+    }
+    return error?.message || 'GitHub 同步失败';
+  }
   async function ghFetch(method, url, body) {
     const pat = safeLS.get('github_pat');
     if (!pat) throw new Error('需要 GitHub PAT');
@@ -3993,38 +4599,41 @@ function App() {
       headers: { Authorization: `Bearer ${pat}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(body ? { 'Content-Type': 'application/json' } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
-    if (!res.ok) { const t = await res.text(); throw new Error(`GitHub ${res.status}: ${t.slice(0,120)}`); }
+    if (!res.ok) {
+      const raw = await res.text();
+      let detail = '';
+      try { detail = JSON.parse(raw)?.message || ''; } catch (e) {}
+      const error = new Error(`GitHub ${res.status}: ${detail || '请求失败'}`);
+      error.status = res.status;
+      throw error;
+    }
     return res.json();
   }
   async function loadLibrary() {
     setLibLoading(true); setLibError(null);
+    const localItems = readLocalLibrary();
+    setLibItems(localItems);
+    if (!safeLS.get('github_pat')) { setLibLoading(false); return; }
     try {
-      const data = await ghFetch('GET', `https://api.github.com/repos/${GH_REPO}/contents/${GH_LIB_PATH}`);
+      const data = await ghFetch('GET', `https://api.github.com/repos/${getGitHubRepo()}/contents/${GH_LIB_PATH}`);
       const parsed = JSON.parse(atob(data.content.replace(/\n/g, '')));
-      setLibItems(parsed.songs || []); setLibSha(data.sha);
+      const merged = mergeLibraryItems((parsed.songs || []).map(hydrateLibraryItem), localItems);
+      setLibItems(merged); writeLocalLibrary(merged); setLibSha(data.sha);
     } catch (e) {
-      if (e.message.includes('404')) { setLibItems([]); setLibSha(null); }
-      else setLibError(e.message);
+      if (e.status === 404) { setLibItems(localItems); setLibSha(null); }
+      else { setLibItems(localItems); setLibError(`GitHub 同步失败，当前显示本地收藏。${githubSyncMessage(e)}`); }
     }
     setLibLoading(false);
   }
   async function _writeLibrary(items, sha) {
-    const json = JSON.stringify({ version: 1, songs: items }, null, 2);
+    const json = JSON.stringify({ version: 2, songs: items.map(hydrateLibraryItem) }, null, 2);
     const content = btoa(unescape(encodeURIComponent(json)));
-    const res = await ghFetch('PUT', `https://api.github.com/repos/${GH_REPO}/contents/${GH_LIB_PATH}`,
+    const res = await ghFetch('PUT', `https://api.github.com/repos/${getGitHubRepo()}/contents/${GH_LIB_PATH}`,
       { message: `update library (${items.length} items)`, content, ...(sha ? { sha } : {}) });
     setLibSha(res.content.sha);
   }
   async function addToLibrary(item) {
     const pat = safeLS.get('github_pat');
-    if (!pat) { setSettingsOpen(true); pushToast('请先在设置里填入 GitHub PAT', { kind: 'warn' }); return; }
-    // Always read latest SHA to avoid conflicts
-    let curItems = [], curSha = null;
-    try {
-      const data = await ghFetch('GET', `https://api.github.com/repos/${GH_REPO}/contents/${GH_LIB_PATH}`);
-      const parsed = JSON.parse(atob(data.content.replace(/\n/g, '')));
-      curItems = parsed.songs || []; curSha = data.sha;
-    } catch (e) { if (!e.message.includes('404')) { pushToast('读取曲库失败: ' + e.message, { kind: 'error' }); return; } }
     const isSong = !!item.sel;
     const ai = item.ai || item.data || {};
     const entry = {
@@ -4036,93 +4645,209 @@ function App() {
       createdAt: item.createdAt || null,
       savedAt: new Date().toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
       publishedAt: null,
+      ...(isSong ? {
+        sunoRecipe: normalizeSunoRecipe(item.ai?.suno?.recipe, {
+          lyrics: item.ai?.suno?.lyrics || item.ai?.suno?.structure,
+          style: item.ai?.suno?.style,
+          exclude: item.ai?.suno?.exclude,
+          title: ai.title || item.id,
+          workspace: 'Awen · Singles',
+        }),
+      } : {
+        workspace: item.data?.workspace || `Awen · ${item.data?.album || ai.title || item.id}`,
+        sunoRecipes: (item.data?.tracks || []).map(track => normalizeSunoRecipe(track.sunoRecipe, {
+          lyrics: track.lyrics,
+          style: track.style || item.data?.anchor,
+          exclude: track.exclude,
+          title: track.title,
+          workspace: item.data?.workspace || `Awen · ${item.data?.album || item.id}`,
+        })),
+      }),
     };
-    const idx = curItems.findIndex(x => x.id === item.id);
-    const updated = idx >= 0 ? curItems.map((x, i) => i === idx ? { ...x, ...entry } : x) : [entry, ...curItems];
+    const localItems = readLocalLibrary();
+    const localIdx = localItems.findIndex(x => x.id === item.id);
+    const localUpdated = localIdx >= 0
+      ? localItems.map((x, i) => i === localIdx ? { ...x, ...entry } : x)
+      : [entry, ...localItems];
+    if (!writeLocalLibrary(localUpdated)) {
+      pushToast('本地收藏失败：浏览器存储不可用或空间不足。', { kind: 'error' });
+      return;
+    }
+    setLibItems(prev => mergeLibraryItems(prev, localUpdated));
+    setSongs(prev => prev.map(s => s.id === item.id ? { ...s, starred: true } : s));
+    setAlbums(prev => prev.map(a => a.id === item.id ? { ...a, starred: true } : a));
+
+    if (!pat) {
+      pushToast(`⭐ 已在本机收藏「${entry.title}」；如需跨设备，可在设置中开启 GitHub 同步。`);
+      return;
+    }
+
+    // Always read the latest SHA, then merge local and remote favourites.
+    let remoteItems = [], curSha = null;
+    try {
+      const data = await ghFetch('GET', `https://api.github.com/repos/${getGitHubRepo()}/contents/${GH_LIB_PATH}`);
+      const parsed = JSON.parse(atob(data.content.replace(/\n/g, '')));
+      remoteItems = parsed.songs || []; curSha = data.sha;
+    } catch (e) {
+      if (e.status !== 404) {
+        pushToast(`⭐ 已在本机收藏「${entry.title}」；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 });
+        return;
+      }
+    }
+    const updated = mergeLibraryItems(remoteItems, localUpdated);
     try {
       await _writeLibrary(updated, curSha);
       setLibItems(updated);
-      setSongs(prev => prev.map(s => s.id === item.id ? { ...s, starred: true } : s));
-      setAlbums(prev => prev.map(a => a.id === item.id ? { ...a, starred: true } : a));
+      writeLocalLibrary(updated);
       pushToast(`⭐ 已收藏「${entry.title}」并推送到 GitHub`);
-    } catch (e) { pushToast('收藏失败: ' + e.message, { kind: 'error' }); }
+    } catch (e) {
+      pushToast(`⭐ 已在本机收藏「${entry.title}」；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 });
+    }
   }
   async function removeFromLibrary(id) {
     const updated = libItems.filter(x => x.id !== id);
+    writeLocalLibrary(updated);
+    setLibItems(updated);
+    setSongs(prev => prev.map(s => s.id === id ? { ...s, starred: false } : s));
+    setAlbums(prev => prev.map(a => a.id === id ? { ...a, starred: false } : a));
+    if (!safeLS.get('github_pat')) { pushToast('已从本机曲库移除'); return; }
     try {
       await _writeLibrary(updated, libSha);
-      setLibItems(updated);
-      setSongs(prev => prev.map(s => s.id === id ? { ...s, starred: false } : s));
-      setAlbums(prev => prev.map(a => a.id === id ? { ...a, starred: false } : a));
-      pushToast('已从曲库移除');
-    } catch (e) { pushToast('移除失败: ' + e.message, { kind: 'error' }); }
+      pushToast('已从本机与 GitHub 曲库移除');
+    } catch (e) { pushToast(`已从本机曲库移除；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 }); }
   }
   async function setPublishedAt(id, date) {
     const updated = libItems.map(x => x.id === id ? { ...x, publishedAt: date } : x);
-    try { await _writeLibrary(updated, libSha); setLibItems(updated); }
-    catch (e) { pushToast('保存失败: ' + e.message, { kind: 'error' }); }
+    writeLocalLibrary(updated); setLibItems(updated);
+    if (!safeLS.get('github_pat')) return;
+    try { await _writeLibrary(updated, libSha); }
+    catch (e) { pushToast(`发布日期已保存在本机；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 }); }
   }
   React.useEffect(() => { if (mode === 'library') loadLibrary(); }, [mode]);
 
   // API key is requested via a React modal on first use, then stored in localStorage.
-  let _tokenResolver = null;
+  // Keep the pending resolver across React re-renders. Opening TokenModal
+  // triggers a render; a plain local variable would be reset and Cancel could
+  // leave generation stuck forever instead of falling back to templates.
+  const tokenResolverRef = React.useRef(null);
   function requestTokenViaModal() {
     return new Promise((resolve) => {
-      _tokenResolver = resolve;
+      tokenResolverRef.current = resolve;
       window.dispatchEvent(new CustomEvent('awen-need-token'));
     });
   }
   function resolveToken(token) {
-    if (_tokenResolver) { _tokenResolver(token); _tokenResolver = null; }
+    if (tokenResolverRef.current) {
+      tokenResolverRef.current(token);
+      tokenResolverRef.current = null;
+    }
   }
   window.__awen_resolveToken = resolveToken;
 
-  async function getApiKey() {
-    let key = safeLS.get('mimo_api_key');
-    if (!key) {
-      key = await requestTokenViaModal();
-      if (key) safeLS.set('mimo_api_key', key.trim());
+  async function getProviderWithKey() {
+    let cfg = loadAIProviderConfig();
+    if (!cfg.apiKey) {
+      const key = await requestTokenViaModal();
+      if (key) cfg = saveAIProviderConfig({ ...cfg, apiKey: key.trim() });
     }
-    return key || '';
+    setProviderConfig(cfg);
+    setHasKey(!!cfg.apiKey);
+    return cfg;
+  }
+
+  function providerText(data) {
+    const chat = data?.choices?.[0]?.message?.content;
+    if (typeof chat === 'string') return chat;
+    if (Array.isArray(chat)) {
+      const joined = chat.map(x => typeof x === 'string' ? x : (x?.text || '')).join('');
+      if (joined) return joined;
+    }
+    if (typeof data?.output_text === 'string') return data.output_text;
+    if (Array.isArray(data?.output)) {
+      const joined = data.output.flatMap(item => Array.isArray(item?.content) ? item.content : [])
+        .map(part => typeof part?.text === 'string' ? part.text : '').join('');
+      if (joined) return joined;
+    }
+    return '';
+  }
+
+  async function callProvider(endpoint, apiKey, payload, signal) {
+    const isLocalApp = ['127.0.0.1', 'localhost'].includes(window.location.hostname);
+    if (isLocalApp) {
+      return fetch('/api/llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint, apiKey, payload }),
+        signal,
+      });
+    }
+    return fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify(payload),
+      signal,
+    });
   }
 
   async function complete(prompt) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
     try {
-      const apiKey = await getApiKey();
-      if (!apiKey) throw new Error(T('aiNeedToken'));
-      const r = await fetch(MIMO_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type':  'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: MIMO_MODEL,
-          messages: [{ role: 'user', content: prompt }],
-        }),
-        signal: ctrl.signal,
-      });
+      const cfg = await getProviderWithKey();
+      if (!cfg.apiKey) throw new Error(window.I18N.isZh() ? '需要 API Key 才能使用 AI 生成' : 'API Key required for AI generation');
+      const endpoint = providerEndpoint(cfg);
+      if (!endpoint || !cfg.model) throw new Error(window.I18N.isZh() ? '请先在设置中配置 Provider URL 与模型' : 'Configure provider URL and model first');
+      const payload = providerPayload(cfg, prompt);
+      let activeCfg = cfg;
+      let r = await callProvider(endpoint, cfg.apiKey, payload, ctrl.signal);
+
+      // Luna can occasionally fail upstream with an HTML 404 while the Go
+      // gateway and subscription key remain valid. Retry once through another
+      // documented Go model, then remember the working preset.
+      if (r.status === 404 && cfg.preset === 'opencode-go-responses') {
+        await r.text().catch(() => '');
+        const fallback = AI_PROVIDER_PRESETS['opencode-go-mimo'];
+        activeCfg = { preset: 'opencode-go-mimo', ...fallback, apiKey: cfg.apiKey };
+        const fallbackPayload = providerPayload(activeCfg, prompt);
+        r = await callProvider(providerEndpoint(fallback), cfg.apiKey, fallbackPayload, ctrl.signal);
+        if (r.ok) {
+          const savedFallback = saveAIProviderConfig(activeCfg);
+          setProviderConfig(savedFallback);
+          setHasKey(true);
+          pushToast(window.I18N.isZh()
+            ? 'Luna 路由返回 404，已自动切换到 OpenCode Go · MiMo-V2.5-Pro。'
+            : 'Luna returned 404; switched automatically to OpenCode Go · MiMo-V2.5-Pro.',
+          { duration: 8000 });
+        }
+      }
+      if (r.status === 503 && cfg.preset === 'opencode-go-deepseek-v4-pro') {
+        await r.text().catch(() => '');
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        r = await callProvider(endpoint, cfg.apiKey, payload, ctrl.signal);
+      }
       if (r.status === 401) {
-        safeLS.del('mimo_api_key');
-        throw new Error(T('aiBadToken'));
+        const cleared = saveAIProviderConfig({ ...activeCfg, apiKey: '' });
+        setProviderConfig(cleared); setHasKey(false);
+        throw new Error(window.I18N.isZh() ? `${activeCfg.label} API Key 无效（401）` : `${activeCfg.label} API key invalid (401)`);
       }
       if (r.status === 402) {
-        throw new Error(window.I18N.isZh()
-          ? 'MiMo 余额不足，请到 xiaomimimo.com 充值后重试'
-          : 'MiMo balance is empty — top up at xiaomimimo.com and retry');
+        throw new Error(window.I18N.isZh() ? `${activeCfg.label} 余额或额度不足（402）` : `${activeCfg.label} balance or quota exhausted (402)`);
       }
       if (!r.ok) {
         const err = await r.text().catch(() => '');
-        throw new Error(`MiMo ${r.status}: ${err.slice(0, 100)}`);
+        throw new Error(`${activeCfg.label} ${r.status}: ${providerErrorSummary(r, err)}`);
       }
       const data = await r.json();
-      const text = data?.choices?.[0]?.message?.content ?? '';
-      if (!text) throw new Error('MiMo returned empty response');
+      const text = providerText(data);
+      if (!text) throw new Error(`${activeCfg.label} returned empty response`);
       return text;
     } catch (e) {
       if (e.name === 'AbortError') throw new Error(T('aiTimeout'));
+      if (e instanceof TypeError && /fetch/i.test(e.message || '')) {
+        throw new Error(window.I18N.isZh()
+          ? 'Provider 请求失败。请使用本地启动脚本，并检查 URL、网络或中转站状态。'
+          : 'Provider request failed. Run the local launcher and check URL/network/provider status.');
+      }
       throw e;
     } finally {
       clearTimeout(t);
@@ -4149,7 +4874,7 @@ VISUAL IDENTITY (keep recognizable across all Awen output)
 - Narrative Motif: ${s.motif}
 
 GOAL (Awen Music V5): produce a Spotify-grade, 4-6 MINUTE instrumental piece — never a 1-2 min loop.
-CARDINAL RULE: STYLE controls SOUND. LYRICS controls STRUCTURE ONLY. For instrumental tracks the lyrics box holds NOTHING but the bare metatag skeleton.
+CARDINAL RULE: STYLE controls SOUND. Also return a bare structure skeleton for Awen's optional Prompt experiment; the stable Instrumental route leaves Suno Lyrics empty.
 
 STYLE BOX RULES — goes in Suno's "Style of Music" field (this carries EVERYTHING: sound + scene + atmosphere):
 - Comma-separated descriptors ONLY. No sentences.
@@ -4159,7 +4884,7 @@ STYLE BOX RULES — goes in Suno's "Style of Music" field (this carries EVERYTHI
 - You MUST append these long-form words verbatim at the end (they force a 4-6 min runtime): "${A.V3_LONGFORM}".
 - Avoid: "crisp", "polished", "clean". No char cap — a rich STYLE is good.
 
-LYRICS — return EXACTLY this bare skeleton, nothing after any tag (no prose, no imagery, no singable words — it would make Suno try to sing):
+LYRICS SKELETON — return EXACTLY this reference skeleton for the optional structure experiment, nothing after any tag (no prose, no imagery, no singable words):
 [Instrumental]
 [Intro]
 [Verse A]
@@ -4171,8 +4896,10 @@ LYRICS — return EXACTLY this bare skeleton, nothing after any tag (no prose, n
 [Outro]
 [End]
 
+HARD OUTPUT BUDGET: the complete minified JSON must be under 4000 characters. Keep "style" under 650 characters; "cover", "video", and "thumb" under 320 characters each; every other prose field under 180 characters. Be concise and never repeat phrases.
+
 Return ONLY minified JSON (no markdown) with EXACTLY this shape:
-{"title":"evocative 2-5 word Title Case song name","tagline":"3-6 word mood tagline lowercase","suno":{"key":"musical key + mode (INTERNAL, not shown)","style":"comma-separated Suno Style string, motif included, ending with the long-form words","lyrics":"[Instrumental]\n[Intro] ...\n[Verse A] ...\n[Verse B] ...\n[Bridge] ...\n[Verse C] ...\n[Bridge] ...\n[Verse D] ...\n[Outro] ...\n[End]","prompt":"ONE short reference sentence","motif":"the shared melodic motif in 3-6 words"},"cover":"square 1:1 cover-art prompt: Character + Environment + Motif + Light + Palette + camera + mood; Awen signatures (open book, warm lamp, wood, cozy); centered, negative space near top for title; no text, no logos, no motion","video":"16:9 looping video: motif in slow motion, same light + palette, dust drift, slow cinematic drift, shallow DOF, seamless loop, no people","thumb":"YouTube 1280×720 consistency rules: same palette + lamp + open book every time, Awen wordmark lower-left, same title type top-left"}
+{"title":"evocative 2-5 word Title Case song name","tagline":"3-6 word mood tagline lowercase","suno":{"key":"musical key + mode (INTERNAL, not shown)","style":"comma-separated Suno Style string, motif included, ending with the long-form words","lyrics":"[Instrumental]\n[Intro] ...\n[Verse A] ...\n[Verse B] ...\n[Bridge] ...\n[Verse C] ...\n[Bridge] ...\n[Verse D] ...\n[Outro] ...\n[End]","exclude":"vocals, singing, spoken word, harsh percussion, sudden dynamics, crisp, polished","prompt":"ONE short reference sentence","motif":"the shared melodic motif in 3-6 words"},"cover":"square 1:1 cover-art prompt: Character + Environment + Motif + Light + Palette + camera + mood; Awen signatures (open book, warm lamp, wood, cozy); centered, negative space near top for title; no text, no logos, no motion","video":"16:9 looping video: motif in slow motion, same light + palette, dust drift, slow cinematic drift, shallow DOF, seamless loop, no people","thumb":"YouTube 1280×720 consistency rules: same palette + lamp + open book every time, Awen wordmark lower-left, same title type top-left"}
 No vocals. Cover / video / thumbnail MUST share the same visual identity.`;
     const raw = await complete(prompt);
     const a = raw.indexOf('{'),b = raw.lastIndexOf('}');
@@ -4188,7 +4915,7 @@ No vocals. Cover / video / thumbnail MUST share the same visual identity.`;
         lyrics: A.V5_LYRICS,
         prompt: String(j.suno.prompt),
         motif: A.cleanMotif(String(j.suno.motif || ''), s.instrument),
-        exclude: String(j.suno.exclude || 'vocals, lyrics, crisp, polished')
+        exclude: String(j.suno.exclude || SUNO_EXCLUDE_DEFAULT)
       },
       cover: String(j.cover || ''),
       video: String(j.video || j.veo || ''),
@@ -4222,6 +4949,7 @@ No vocals. Cover / video / thumbnail MUST share the same visual identity.`;
     }
     const genTime = ai ? ((Date.now() - _genStart) / 1000).toFixed(1) : null;
     if (!ai) ai = A.fallbackPrompt(baseSel);
+    ai = attachSongSunoRecipe(ai, sunoDefaults);
 
     setSongs((prev) => prev.map((x) => x.id === id ? { ...x, generating: false, ai, genTime, createdAt: new Date().toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) } : x));
     setBusy(false);
@@ -4261,6 +4989,7 @@ No vocals. Cover / video / thumbnail MUST share the same visual identity.`;
       key:       String(t.key      || A.musicalKey(r.mood || 'Calm')),
       style:     A.ensureLongform(String(t.style || '')),
       lyrics:    A.V5_LYRICS,
+      exclude:   String(t.exclude || SUNO_EXCLUDE_DEFAULT),
       motifMark: t.motifMark === 'null' ? null : (t.motifMark || null),
       prompt:    String(t.prompt   || ''),
     };
@@ -4294,7 +5023,7 @@ Track 1: introduce clearly. Track ${Math.floor(total/2)+1}: subtle variation. Tr
 TRACKS FOR THIS BATCH:
 ${lines}
 
-V5 TRACK RULES (every track) — STYLE controls SOUND + SCENE; LYRICS is bare STRUCTURE only:
+V5 TRACK RULES (every track) — STYLE controls SOUND + SCENE; also return a bare skeleton for Awen's optional structure experiment:
 - "style": comma-separated Suno Style string. Order: genre → lead instrument → shared motif (in WORDS, never note names) → 1-2 support → SCENE/AMBIENCE imagery (place, weather, light, time — e.g. "rainy library atmosphere, morning light through tall windows, quiet pages turning") → mood → texture (vinyl crackle, tape saturation). MUST end with the long-form words verbatim: "${A.V3_LONGFORM}". No char cap.
 - "lyrics": you may leave it as the bare skeleton "[Instrumental]\\n[Intro]\\n[Verse A]\\n[Verse B]\\n[Bridge]\\n[Verse C]\\n[Bridge]\\n[Verse D]\\n[Outro]\\n[End]" — the app fills this in. Put NO prose or imagery in lyrics.
 - All scene/atmosphere description goes in STYLE, never in lyrics.
@@ -4320,7 +5049,7 @@ ${isLast ? `- Track ${total} MUST return the core motif resolved, near-silent dy
 TRACKS ${startIdx + 1}–${startIdx + batch.length} of ${total}:
 ${lines}
 
-Each track: "style" carries sound + SCENE imagery (place, weather, light, time) + mood + texture, threads the shared motif (in words, never note names), and ends with the long-form words "${A.V3_LONGFORM}". Leave "lyrics" as the bare skeleton — the app fills it; put NO prose/imagery in lyrics.
+Each track: "style" carries sound + SCENE imagery (place, weather, light, time) + mood + texture, threads the shared motif (in words, never note names), and ends with the long-form words "${A.V3_LONGFORM}". Leave "lyrics" as the bare reference skeleton — the app fills it for the optional Prompt experiment; put NO prose/imagery in lyrics.
 
 Return ONLY a minified JSON ARRAY (no wrapper), exactly ${batch.length} items:
 [{"title":"","scene":"2-4 words","role":"","key":"","style":"genre + instrument + motif + scene imagery + mood + texture + long-form words","motifMark":"intro|variation|return|null","prompt":""}]
@@ -4397,6 +5126,7 @@ Calm, warm, instrumental, no vocals.`;
     }
     const albGenTime = data ? ((Date.now() - _albStart) / 1000).toFixed(1) : null;
     if (!data) data = A.fallbackAlbum(axisKey, sel, recipes);
+    data = attachAlbumSunoRecipes(data, sunoDefaults);
     setAlbums((prev) => prev.map((x) => x.id === id ? { ...x, generating: false, data, genTime: albGenTime, createdAt: new Date().toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) } : x));
     setBusy(false);
   }
@@ -4420,6 +5150,7 @@ Calm, warm, instrumental, no vocals.`;
     }
     const scnGenTime = data ? ((Date.now() - _scnStart) / 1000).toFixed(1) : null;
     if (!data) data = A.fallbackAlbum('day', base, recipes);
+    data = attachAlbumSunoRecipes(data, sunoDefaults);
     setAlbums((prev) => prev.map((x) => x.id === id ? { ...x, generating: false, data, genTime: scnGenTime, createdAt: new Date().toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) } : x));
     setBusy(false);
   }
@@ -4449,18 +5180,21 @@ Calm, warm, instrumental, no vocals.`;
   return (
     <div className="app" data-theme={t.theme} data-density={t.density} data-mode={mode}>
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)}
-        onMimoSaved={(v) => setHasKey(v)} />
+        onProviderSaved={(cfg) => { setProviderConfig(cfg); setHasKey(!!cfg.apiKey); }}
+        sunoDefaults={sunoDefaults} onSunoDefaultsSaved={setSunoDefaults} />
       <TokenModal open={tokenModalOpen}
+        providerLabel={providerConfig.label}
         onSubmit={(v) => { setTokenModalOpen(false); window.__awen_resolveToken(v); }}
         onCancel={() => { setTokenModalOpen(false); window.__awen_resolveToken(''); }} />
       <ToastContainer toasts={toasts} onClose={dismissToast} onAction={handleToastAction} />
       {!hasKey && (
         <div className="key-banner">
-          <span className="key-banner-label">🔑 {window.I18N.isZh() ? '填入 MiMo API Key 才能 AI 生成' : 'Enter MiMo API Key to enable AI generation'}</span>
+          <span className="key-banner-label">🔑 {window.I18N.isZh() ? `${providerConfig.label} · 填入 API Key` : `${providerConfig.label} · Enter API Key`}</span>
           <input className="key-banner-input" type="password" value={bannerVal}
-            placeholder="tp-xxxx..." onChange={e => setBannerVal(e.target.value)}
+            placeholder="sk-... / tp-..." onChange={e => setBannerVal(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && saveBannerKey()} />
           <button className="key-banner-btn" onClick={saveBannerKey}>{window.I18N.isZh() ? '保存' : 'Save'}</button>
+          <button className="key-banner-btn" onClick={() => setSettingsOpen(true)}>{window.I18N.isZh() ? '更换 Provider' : 'Change Provider'}</button>
         </div>
       )}
       {/* top bar */}
@@ -4486,7 +5220,7 @@ Calm, warm, instrumental, no vocals.`;
         <button type="button" className="help-btn" onClick={() => setShowGuide(true)}>
           <span className="help-q">?</span> {T('help')}
         </button>
-        <button type="button" className="settings-btn" title="设置 (MiMo Key / GitHub PAT)" onClick={() => setSettingsOpen(true)}>⚙</button>
+        <button type="button" className="settings-btn" title="设置 (AI Provider / GitHub PAT)" onClick={() => setSettingsOpen(true)}>⚙</button>
         <div className="lang-toggle">
           <button type="button" className={'lang-opt' + (lang === 'zh' ? ' on' : '')}
           onClick={() => setLang('zh')}>中</button>
@@ -4662,8 +5396,8 @@ Calm, warm, instrumental, no vocals.`;
           {!libLoading && !libError && libItems.length === 0 && (
             <div className="empty">
               <b>曲库是空的</b>
-              <p>在任意歌曲 / 专辑卡片上点 ⭐ 收藏，自动保存到 GitHub</p>
-              {!safeLS.get('github_pat') && <button className="key-banner-btn" style={{marginTop:8}} onClick={() => setSettingsOpen(true)}>⚙ 先设置 GitHub PAT</button>}
+              <p>在任意歌曲 / 专辑卡片上点 ⭐，会先保存到当前浏览器。</p>
+              {!safeLS.get('github_pat') && <button className="key-banner-btn" style={{marginTop:8}} onClick={() => setSettingsOpen(true)}>⚙ 可选：设置 GitHub 跨设备同步</button>}
             </div>
           )}
           {!libLoading && libItems.length > 0 && (

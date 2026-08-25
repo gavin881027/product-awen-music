@@ -1,6 +1,6 @@
 # Awen Music — Matrix Generator
 
-> **V2.2** — Musical Coherence Engine + Track Role Signatures
+> **V2.3** — Suno Recipe Bridge + Provider & Library Workflows
 
 [English](#english) | [中文](#中文)
 
@@ -21,19 +21,28 @@
 - **Musical Coherence Engine** — 自动生成调性、精炼风格框、5 段编曲结构（metatag 格式）
 - **Track Role Signatures** — 每首歌在专辑中有独立角色和记忆点
 - **Universe Builder** — 保存视觉身份，跨专辑复用
-- **一键复制** — Suno 三框、封面 prompt、视频 prompt、YouTube 元数据、文件命名
+- **Suno 配方桥接** — 按 Lyrics → Style → Exclude → 参数 → Title → Workspace 的页面顺序逐项复制
+- **互斥 Lyrics 路线** — 结构 Prompt 实验路线与 Instrumental 稳定路线一键切换，不再混用
+- **配方快照曲库** — 单曲/专辑保存完整 Suno 配方；旧收藏自动升级到 schema v2
+- **发布素材折叠区** — 封面、视频、缩略图、YouTube 元数据和文件名集中管理
 - **AI + 离线双引擎** — AI 不可用时自动切换模板引擎，所有功能可用
 - **8 种语言** — 中 · 英 · 日 · 韩 · 法 · 西 · 德 · 葡
 - **4 套主题** — Console（深色）· Lo-fi（暖棕）· Clean（浅色）· Studio（中性深）
 
 ### 本地运行
 
-无需安装，直接启动：
+无需安装，直接启动本地服务（包含通用 AI Provider 代理）：
 
 ```bash
-python3 -m http.server 8000 --directory docs
+python3 server.py --port 8000
 # 打开 http://localhost:8000
 ```
+
+不要直接用 `file://` 打开 `docs/index.html`，否则浏览器无法使用本地 Provider 代理。当前版本即使被双击，也会自动跳回 `http://127.0.0.1:8000/`；请先确保 `server.py` 或桌面启动脚本正在运行。
+
+设置中可选择 MiMo、OpenCode Go（GLM-5.3、MiMo-V2.5-Pro、DeepSeek V4 Pro、GPT-5.6 Luna）或任意 OpenAI-compatible 中转站。OpenCode Go 的官方预设会自动校准地址/协议；DeepSeek V4 Pro 预设关闭思考模式并使用严格 JSON 输出，503 时自动重试一次；Luna 若返回上游 404，会自动切换到同一订阅下的 MiMo-V2.5-Pro。API Key 仅保存在浏览器本地；`server.py` 绑定 `127.0.0.1`，用于解决浏览器 CORS，不记录请求正文或 Key。
+
+曲库采用本地优先：点击 ⭐ 会立即保存到当前浏览器，即使 GitHub PAT 无权限也不会丢失。跨设备同步是可选功能；在设置中填写目标 `owner/repo`（可以是自己的 fork）和 Fine-grained PAT，Token 必须选中同一仓库并授予 `Contents: Read and write`，组织仓库可能还需管理员批准。
 
 ### 部署 & 同步
 
@@ -62,7 +71,7 @@ python3 -m http.server 8000 --directory docs
 
 ```
 awen-music/
-├── docs/index.html              ← 完整构建（V2.2，与线上同步）
+├── docs/index.html              ← 完整构建（V2.3，与线上同步）
 ├── src/                         ← 拆分源码（V2.0 基础版）
 │   ├── data.js                  矩阵数据 + prompt 引擎
 │   ├── i18n.js                  多语言字符串
@@ -78,12 +87,13 @@ awen-music/
 └── SUNO_BEST_PRACTICES.md       Suno 使用指南
 ```
 
-> `src/` 目前是 V2.0 版本。V2.1/V2.2 的新功能直接在 `docs/index.html` 单文件中开发。后续计划回迁到拆分源码。
+> `src/` 目前是 V2.0 版本。V2.1–V2.3 的新功能直接在 `docs/index.html` 单文件中开发。后续计划回迁到拆分源码。
 
 ### 版本历史
 
 | 版本 | 主要变更 |
 |---|---|
+| **V2.3** | Suno 配方桥接 · Provider 代理 · 曲库 schema v2 · Study With Me 低干扰约束 |
 | **V2.2** | Musical Coherence Engine · Track Role Signatures · 增强 SongCard/AlbumCard |
 | **V2.1** | 健壮性修复：safeLS · AbortController 超时 · TokenModal · Toast 通知 |
 | **V2.0** | Universe Engine：11 维矩阵 · 视觉身份 · 专辑 DNA · 元数据生成 · Smart Decompose |
@@ -104,19 +114,28 @@ A **lo-fi study music prompt factory**. Configure a "sound recipe" on an 11-dime
 - **Musical Coherence Engine** — auto-generate musical key, refined style boxes, 5-segment arrangement structures (metatag format)
 - **Track Role Signatures** — each song gets a unique role and signature element within an album
 - **Universe Builder** — save and reuse visual identities across albums
-- **One-click copy** — Suno three-box, cover prompt, video prompt, YouTube metadata, file naming
+- **Suno recipe bridge** — copy fields in the same order as Suno: Lyrics → Style → Exclude → controls → Title → Workspace
+- **Mutually exclusive Lyrics routes** — switch between experimental structure Prompt and stable Instrumental workflows
+- **Recipe snapshots** — persist full per-song/per-track Suno recipes with schema-v2 migration for existing favorites
+- **Collapsible publishing assets** — cover, video, thumbnail, YouTube metadata, and filenames stay available without competing with Suno inputs
 - **AI + offline dual engine** — graceful fallback to template engine when AI is unavailable
 - **8 languages** — ZH · EN · JA · KO · FR · ES · DE · PT
 - **4 themes** — Console (dark) · Lo-fi (warm) · Clean (light) · Studio (neutral dark)
 
 ### Run Locally
 
-No install needed:
+No install needed. Start the local server (including the generic AI-provider proxy):
 
 ```bash
-python3 -m http.server 8000 --directory docs
+python3 server.py --port 8000
 # open http://localhost:8000
 ```
+
+Do not open `docs/index.html` directly as a `file://` page; that origin cannot use the local provider proxy. Current builds redirect a double-clicked file to `http://127.0.0.1:8000/`, so start `server.py` or the desktop launcher first.
+
+Settings support MiMo, OpenCode Go (GLM-5.3, MiMo-V2.5-Pro, DeepSeek V4 Pro, and GPT-5.6 Luna), and arbitrary OpenAI-compatible relays. Official Go presets keep their documented routes/protocols. The DeepSeek V4 Pro preset disables thinking, requests strict JSON, and retries one transient 503; a Luna upstream 404 automatically falls back to MiMo-V2.5-Pro under the same Go subscription. API keys remain in browser localStorage; `server.py` binds to `127.0.0.1`, handles browser CORS, and never logs request bodies or keys.
+
+The library is local-first: ⭐ saves immediately in the current browser even when GitHub permissions are unavailable. Optional cross-device sync accepts a configurable `owner/repo` (including your own fork). A fine-grained PAT must select that repository and grant `Contents: Read and write`; organization repositories may also require administrator approval.
 
 ### Deploy & Sync
 
@@ -145,7 +164,7 @@ python3 -m http.server 8000 --directory docs
 
 ```
 awen-music/
-├── docs/index.html              ← self-contained build (V2.2, synced with live)
+├── docs/index.html              ← self-contained build (V2.3, synced with live)
 ├── src/                         ← split source files (V2.0 base)
 │   ├── data.js                  matrix data + prompt engine
 │   ├── i18n.js                  i18n strings
@@ -161,12 +180,13 @@ awen-music/
 └── SUNO_BEST_PRACTICES.md       Suno usage guide
 ```
 
-> `src/` is at V2.0 level. V2.1/V2.2 features were developed directly in the single-file `docs/index.html`. Back-porting to split source files is a future task.
+> `src/` is at V2.0 level. V2.1–V2.3 features were developed directly in the single-file `docs/index.html`. Back-porting to split source files is a future task.
 
 ### Version History
 
 | Version | Key Changes |
 |---|---|
+| **V2.3** | Suno Recipe Bridge · Provider proxy · library schema v2 · low-distraction Study With Me constraints |
 | **V2.2** | Musical Coherence Engine · Track Role Signatures · Enhanced SongCard/AlbumCard |
 | **V2.1** | Robustness: safeLS · AbortController timeout · TokenModal · Toast notifications |
 | **V2.0** | Universe Engine: 11-dim matrix · Visual identity · Album DNA · Metadata gen · Smart Decompose |

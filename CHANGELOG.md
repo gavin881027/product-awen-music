@@ -5,6 +5,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ---
 
+## [V2.3] — 2026-08-25 — Suno Recipe Bridge
+
+### Added
+- **Suno recipe bridge panel** ordered like Suno Advanced Create: Lyrics route → Style → Exclude Styles → Weirdness → Style Influence → Duration → Song Title → Workspace.
+- **Mutually exclusive Lyrics routes**: experimental structure Prompt or stable Instrumental, with no contradictory “paste Lyrics + enable Instrumental” workflow.
+- **Per-song and per-track recipe snapshots**, including album duration totals and shared album Workspace suggestions.
+- **Schema v2 library records** with automatic migration of existing v1 favorites.
+- **Local OpenAI-compatible provider proxy** bound to `127.0.0.1`, with configurable providers and OpenCode Go presets.
+- **Local-first favorites** with optional GitHub repository synchronization.
+
+### Changed
+- Publishing assets are grouped into collapsible Cover / Video / Thumbnail / metadata sections so Suno inputs remain visually primary.
+- Study With Me long-form constraints now favor restrained dynamics, sparse variation, no dramatic climax, gentle outros, and warm analog texture.
+- Legacy style terms (`late climax`, `high fidelity`, `studio quality`) migrate to lower-distraction equivalents.
+- Local static responses disable caching so provider and UI fixes appear immediately after reload.
+
+### Verified
+- Prompt and Instrumental routes were mapped against the live Suno Advanced Create form without clicking Create or spending credits.
+- Existing four-song library recipes reload with Style, Exclude, 50/70/5:00 controls, title, and Workspace intact.
+- Narrow layouts no longer produce page-level horizontal overflow.
+
+---
+
 ## [V2.1] — 2026-06-20 — Robustness & UX polish
 
 ### 🔴 Bug fixes

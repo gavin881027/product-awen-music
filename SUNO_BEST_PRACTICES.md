@@ -4,17 +4,27 @@
 
 ---
 
-## 一、Suno 的三个输入框——分清楚再动手
+## 一、按当前 Suno Create 页面逐项填写
 
-Suno Custom 模式有三个框，**用途完全不同**，不能混用：
+Awen 的每张生成卡片都有一个 **Suno 配方**面板，顺序与当前页面一致：
 
-| 框名 | 用途 | 填什么 |
-|---|---|---|
-| **Style of Music（风格框）** | 定义整体声音世界：流派、调性、速度、乐器、质感 | `[STYLE OF MUSIC]` 那段 |
-| **Lyrics / Description（歌词框）** | 定义段落结构和起伏弧线 | `[STRUCTURE]` 那段 metatag |
-| **Title（标题）** | 歌名 | `[TITLE]` 那段 |
+| Suno 控件 | Awen 提供什么 |
+|---|---|
+| **Lyrics 模式** | `结构实验 · Prompt` 或 `纯音乐 · Instrumental` 二选一 |
+| **Style of Music** | 声音世界：流派、调性、速度、乐器、质感 |
+| **Exclude Styles** | 排除人声、过重打击乐、突然动态与过亮制作 |
+| **Weirdness** | 全局默认 50% |
+| **Style Influence** | 全局默认 70% |
+| **Duration** | 全局默认 5:00 |
+| **Song Title** | 独立复制的 Suno 歌名 |
+| **Save to Workspace** | 单曲 `Awen · Singles`；专辑 `Awen · 专辑名` |
 
-> ⚠️ **Instrumental 开关必须打开。** 纯器乐曲，描述框（歌词框）填的是结构 metatag，不是歌词。
+### Lyrics 两条路线不能同时执行
+
+- **结构实验（默认）**：在 Suno Lyrics 选择 `Prompt`，粘贴 Awen 的结构描述。它是实验路线，可能产生歌词或人声。
+- **纯音乐稳定路线**：选择 `Instrumental`，不要粘贴任何 Lyrics 内容；Style、Exclude 和其他参数保持不变。
+
+> 如果结构实验出现歌词或人声，直接切换 Instrumental，不要再同时使用结构 Prompt。
 
 ---
 
@@ -67,17 +77,17 @@ Awen Matrix 工具已经自动按照专辑里的位置分配了 10 个角色，�
 | Release | 音域打开，转向更明亮的和声 | 最后第 2 首 |
 | Closure | 第 1 首的旋律回来，终于解决 | 最后 1 首：专辑收束 |
 
-在 Suno 的歌词框结构里，把 Signature Element 写进 `[Main]` 段落描述里即可。
+使用**结构实验路线**时，把 Signature Element 写进 Awen 生成的结构 Prompt 对应主段落里；使用 Instrumental 路线时，不向 Lyrics 粘贴结构内容，只把记忆点保留在 Style 描述中。
 
 ---
 
 ### 问题 3：一首歌从头到尾太平淡
 
-**根因：** 只填了风格框，没有写歌词框的段落结构。Suno 的行为模式是"继续这个 vibe"——没有结构指令，它会一直循环同一个质感，没有任何起伏、高潮、或收尾。
+**常见原因：** Style 只描述音色，没有给出低干扰的段落变化；生成结果容易长时间维持同一种质感。
 
 > <cite>Without structure tags, Suno will just continue the vibe. No payoff.</cite>
 
-**解法：用 metatag 结构写歌词框，给歌一个完整的弧线。**
+**实验解法：** 选择 Lyrics 的 `Prompt` 模式，使用自然语言结构 Prompt 给歌曲一个克制的完整弧线。此方法可能产生歌词或人声；若发生，切换到 Instrumental，并把关键变化要求保留在 Style 中。
 
 #### 标准 5 段结构（推荐）
 
@@ -148,24 +158,23 @@ soft brushed drums, warm bass, vinyl crackle, warm tape saturation, instrumental
 
 1. 在矩阵上选好 7 个声音维度 + 4 个视觉维度
 2. 点「生成歌曲」
-3. 点生成卡片上的「Copy for Suno」——已按三段分好
-4. 打开 Suno Custom 模式，分三次粘贴：
-   - Style of Music 框 ← 贴 `[STYLE OF MUSIC]` 段
-   - Lyrics 框 ← 贴 `[STRUCTURE]` 段（metatag 结构）
-   - Title 框 ← 贴 `[TITLE]` 段
-5. 打开 Instrumental 开关
-6. 点 Create，生成 2 个版本，听一遍
+3. 在生成卡片顶部打开「Suno 配方」
+4. 选择一条 Lyrics 路线：默认先测结构 Prompt；若出现人声则切换 Instrumental
+5. 依次复制 Style、Exclude Styles 和 Song Title
+6. 设置 Weirdness 50%、Style Influence 70%、Duration 5:00
+7. 单曲保存到 `Awen · Singles`，专辑曲目保存到同一个 `Awen · 专辑名` Workspace
+8. 点 Create，生成 2 个版本，听一遍
 
 ### 如果不满意，改哪里
 
 | 问题 | 改什么 |
 |---|---|
 | 音调乱、不协调 | 风格框里加/换调性（`A minor` → `D dorian`） |
-| 太平淡、没起伏 | 歌词框里调整 `[Lift]` 和 `[Breakdown]` 的描述 |
+| 太平淡、没起伏 | 结构实验路线调整段落描述；Instrumental 路线在 Style 中加入 `slow evolving arrangement, gentle sparse variation` |
 | 音色太亮/太干净 | 风格框加 `vinyl crackle, warm tape saturation` |
 | 鼓太重 | 风格框改成 `soft brushed drums` 或 `no drums` |
 | 太吵，太多乐器 | 删掉风格框里 2 个以上的乐器名 |
-| 太像背景音乐、没记忆点 | 在 `[Main]` 里加 signature element（见第二节角色表） |
+| 太像背景音乐、没记忆点 | 结构实验路线在主段落加入 signature element；Instrumental 路线把它写入 Style（见第二节角色表） |
 
 ### 专辑制作
 
