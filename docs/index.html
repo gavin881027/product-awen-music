@@ -2708,6 +2708,240 @@ async function copyText(text) {
   } catch (e) { return false; }
 }
 
+/* ---------- Prompt review exchange helpers ---------- */
+function reviewHash(input) {
+  let hash = 2166136261;
+  const text = String(input || '');
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function toBase64Utf8(text) {
+  return btoa(unescape(encodeURIComponent(String(text || ''))));
+}
+
+function fromBase64Utf8(value) {
+  const raw = atob(String(value || '').replace(/\n/g, ''));
+  const bytes = Uint8Array.from(raw, char => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+function reviewSafeText(value) {
+  return String(value || '').replace(/\r\n/g, '\n').trim();
+}
+
+function reviewListMarkdown(items) {
+  return Array.isArray(items) && items.length
+    ? items.map(item => `- ${reviewSafeText(item)}`).join('\n')
+    : '- 无';
+}
+
+function buildPromptReviewDraft(song) {
+  const ai = song?.ai || {};
+  const recipe = normalizeSunoRecipe(ai.suno?.recipe, {
+    lyrics: ai.suno?.lyrics || ai.suno?.structure,
+    style: ai.suno?.style,
+    exclude: ai.suno?.exclude,
+    title: ai.title || song?.id,
+    workspace: 'Awen · Singles',
+  });
+  const source = {
+    id: String(song?.id || ''),
+    title: String(ai.title || song?.id || 'Untitled'),
+    tagline: String(ai.tagline || ''),
+    createdAt: song?.createdAt || null,
+    selections: song?.sel || {},
+    sunoRecipe: recipe,
+    prompts: {
+      sunoPrompt: String(ai.suno?.prompt || ''),
+      cover: String(ai.cover || ''),
+      video: String(ai.video || ai.veo || ''),
+      thumbnail: String(ai.thumb || ''),
+    },
+  };
+  const sourceHash = reviewHash(JSON.stringify(source));
+  const fileStem = `${source.id}-${sourceHash}`;
+  return {
+    schemaVersion: 1,
+    key: fileStem,
+    id: source.id,
+    title: source.title,
+    status: 'in_review',
+    sourceHash,
+    submittedAt: new Date().toISOString(),
+    sourcePath: `prompts/inbox/${fileStem}.md`,
+    latestReviewPath: null,
+    approvedPath: null,
+    reviewCount: 0,
+    source,
+  };
+}
+
+function renderReviewDraftMarkdown(review) {
+  const { source } = review;
+  const recipe = source.sunoRecipe;
+  return `---
+schemaVersion: 1
+id: ${review.id}
+title: ${JSON.stringify(review.title)}
+status: in_review
+sourceHash: ${review.sourceHash}
+submittedAt: ${review.submittedAt}
+---
+
+# Awen 原始 Prompt
+
+此文件是不可覆盖的初稿。审核结果应以 JSON 返回，并由 Awen 写入独立的 \`reviews/\` 与 \`approved/\` 文件。
+
+## Suno 配方
+
+- Lyrics 路线：${recipe.lyricsRoute}
+- Weirdness：${recipe.weirdness}%
+- Style Influence：${recipe.styleInfluence}%
+- Duration：${sunoDurationLabel(recipe.durationSec)}
+- Song Title：${recipe.title}
+- Workspace：${recipe.workspace}
+
+### Style
+
+${recipe.style}
+
+### Exclude Styles
+
+${recipe.exclude}
+
+### Structure Prompt
+
+${recipe.lyricsRoute === 'structure-prompt' ? recipe.structurePrompt : 'Instrumental 路线：不使用 Lyrics / Structure Prompt。'}
+
+## Awen 原始补充 Prompt
+
+### Suno reference
+
+${source.prompts.sunoPrompt || '无'}
+
+### Cover
+
+${source.prompts.cover || '无'}
+
+### Video
+
+${source.prompts.video || '无'}
+
+### Thumbnail
+
+${source.prompts.thumbnail || '无'}
+
+## 矩阵选择
+
+\`\`\`json
+${JSON.stringify(source.selections, null, 2)}
+\`\`\`
+`;
+}
+
+function renderApprovedReviewMarkdown(review, result, revision) {
+  const recipe = result.revised;
+  return `---
+schemaVersion: 1
+id: ${review.id}
+title: ${JSON.stringify(review.title)}
+status: ${result.decision}
+sourceHash: ${review.sourceHash}
+revision: ${revision}
+reviewedAt: ${result.reviewedAt}
+sourceFile: ${review.sourcePath}
+---
+
+# ChatGPT 审核后 Prompt · r${String(revision).padStart(2, '0')}
+
+## 审核评分
+
+- Focus：${result.scores.focus}/10
+- Dynamic Stability：${result.scores.dynamicStability}/10
+- Vocal Safety：${result.scores.vocalSafety}/10
+- Warmth：${result.scores.warmth}/10
+- Loopability：${result.scores.loopability}/10
+
+## 批准的 Suno 配方
+
+- Lyrics 路线：${recipe.lyricsRoute}
+
+### Style
+
+${recipe.style}
+
+### Exclude Styles
+
+${recipe.exclude}
+
+### Structure Prompt
+
+${recipe.lyricsRoute === 'structure-prompt' ? recipe.structurePrompt : 'Instrumental 路线：不使用 Lyrics / Structure Prompt。'}
+
+## 变更记录
+
+${reviewListMarkdown(result.changes)}
+
+## 风险
+
+${reviewListMarkdown(result.risks)}
+
+## 审核摘要
+
+${result.summary || '无'}
+`;
+}
+
+function validatePromptReviewResult(raw, review) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('审核 JSON 必须是对象。');
+  const allowed = new Set(['id', 'sourceHash', 'decision', 'scores', 'revised', 'changes', 'risks', 'summary']);
+  if (Object.keys(raw).some(key => !allowed.has(key))) throw new Error('审核 JSON 含有未支持字段。');
+  if (raw.id !== review.id || raw.sourceHash !== review.sourceHash) throw new Error('审核结果不属于当前初稿（id 或 sourceHash 不匹配）。');
+  const decisions = ['approve', 'approve_with_changes', 'needs_revision', 'reject'];
+  if (!decisions.includes(raw.decision)) throw new Error('decision 必须为 approve、approve_with_changes、needs_revision 或 reject。');
+  const scoreKeys = ['focus', 'dynamicStability', 'vocalSafety', 'warmth', 'loopability'];
+  if (!raw.scores || typeof raw.scores !== 'object' || scoreKeys.some(key => !Number.isInteger(raw.scores[key]) || raw.scores[key] < 0 || raw.scores[key] > 10)) {
+    throw new Error('scores 必须包含 5 个 0–10 整数评分。');
+  }
+  const revised = raw.revised || {};
+  if (!['structure-prompt', 'instrumental'].includes(revised.lyricsRoute) || !reviewSafeText(revised.style) || !reviewSafeText(revised.exclude) || typeof revised.structurePrompt !== 'string') {
+    throw new Error('revised 必须包含 lyricsRoute、非空 style、非空 exclude 和 structurePrompt。');
+  }
+  if (revised.lyricsRoute === 'instrumental' && reviewSafeText(revised.structurePrompt)) {
+    throw new Error('Instrumental 路线的 structurePrompt 必须为空。');
+  }
+  const lowerExclude = revised.exclude.toLowerCase();
+  const requiredExclude = SUNO_EXCLUDE_DEFAULT.split(',').map(item => item.trim().toLowerCase()).filter(Boolean);
+  if (requiredExclude.some(item => !lowerExclude.includes(item))) {
+    throw new Error('Exclude Styles 不能删除 Study With Me 基础排除项。');
+  }
+  if (!Array.isArray(raw.changes) || !Array.isArray(raw.risks) || raw.changes.length > 20 || raw.risks.length > 20 ||
+      [...raw.changes, ...raw.risks].some(item => !reviewSafeText(item))) {
+    throw new Error('changes 与 risks 必须是最多 20 条的非空文本数组。');
+  }
+  if (raw.summary != null && (typeof raw.summary !== 'string' || raw.summary.length > 2000)) throw new Error('summary 必须是不超过 2000 字符的文本。');
+  return {
+    id: raw.id,
+    sourceHash: raw.sourceHash,
+    decision: raw.decision,
+    scores: Object.fromEntries(scoreKeys.map(key => [key, raw.scores[key]])),
+    revised: {
+      lyricsRoute: revised.lyricsRoute,
+      style: reviewSafeText(revised.style),
+      exclude: reviewSafeText(revised.exclude),
+      structurePrompt: reviewSafeText(revised.structurePrompt),
+    },
+    changes: raw.changes.map(reviewSafeText),
+    risks: raw.risks.map(reviewSafeText),
+    summary: reviewSafeText(raw.summary || ''),
+    reviewedAt: new Date().toISOString(),
+  };
+}
+
 /* ---------- tooltip component ---------- */
 function Tooltip({ text, children }) {
   const [show, setShow] = React.useState(false);
@@ -2859,7 +3093,9 @@ function normalizeSunoRecipe(recipe, fallback = {}) {
   const skeleton = String(recipe?.lyricsSkeleton || fallback.lyricsSkeleton || fallback.lyrics || '');
   return {
     lyricsRoute: d.lyricsRoute,
-    structurePrompt: String(recipe?.structurePrompt || fallback.structurePrompt || sunoStructurePrompt(skeleton)),
+    structurePrompt: d.lyricsRoute === 'instrumental'
+      ? ''
+      : String(recipe?.structurePrompt || fallback.structurePrompt || sunoStructurePrompt(skeleton)),
     lyricsSkeleton: skeleton,
     style: normalizeSunoStyle(recipe?.style || fallback.style || ''),
     exclude: normalizeSunoExclude(recipe?.exclude || fallback.exclude),
@@ -3055,8 +3291,64 @@ function LibCard({ item, onRemove, onSetPublished }) {
   );
 }
 
+/* ---------- Prompt review panel ---------- */
+function PromptReviewPanel({ song, onSubmit, onCopyInstruction, onApply }) {
+  const [reviewJson, setReviewJson] = React.useState('');
+  const [applying, setApplying] = React.useState(false);
+  const review = song.promptReview;
+  const statusLabel = {
+    in_review: '待 ChatGPT 审核',
+    approved: '已批准',
+    needs_revision: '需要修改',
+    rejected: '未通过',
+  }[review?.status] || '尚未提交';
+  const apply = async () => {
+    setApplying(true);
+    try {
+      const accepted = await onApply(song.id, reviewJson);
+      if (accepted) setReviewJson('');
+    } finally {
+      setApplying(false);
+    }
+  };
+  return (
+    <details className="suno-asset-fold prompt-review-fold">
+      <summary>ChatGPT 审核 · {statusLabel}</summary>
+      <div className="suno-asset-body">
+        <div className="settings-note" style={{marginBottom:10}}>
+          {review
+            ? <>初稿：<b>{review.sourcePath}</b> · sourceHash <b>{review.sourceHash}</b>{review.approvedPath && <> · 当前批准版本：<b>{review.approvedPath}</b></>}</>
+            : '提交后会保存 Awen 初稿、生成 ChatGPT 审核指令，并保留所有批准版本。'}
+        </div>
+        <div className="settings-actions" style={{marginTop:0}}>
+          <button className="settings-save-btn" onClick={() => onSubmit(song.id)}>
+            {review ? '提交当前版本复审' : '提交 ChatGPT 审核'}
+          </button>
+          {review && <button className="settings-clear-btn" onClick={() => onCopyInstruction(song.id)}>复制 ChatGPT 审核指令</button>}
+        </div>
+        {review && <div className="block" style={{marginTop:12}}>
+          <div className="block-head">
+            <div className="block-labels">
+              <span className="block-label">导入 ChatGPT 审核 JSON</span>
+              <span className="field-hint">通过会生成批准版本；需要修改/拒绝只记录审核结论</span>
+            </div>
+          </div>
+          <textarea className="settings-input" value={reviewJson}
+            placeholder='粘贴符合 review-v1.json 的 ChatGPT 审核结果'
+            onChange={e => setReviewJson(e.target.value)} style={{minHeight:150, resize:'vertical'}} />
+          <div className="settings-actions">
+            <button className="settings-save-btn" onClick={apply} disabled={!reviewJson.trim() || applying}>
+              {applying ? '正在应用…' : '应用审核并推送'}
+            </button>
+          </div>
+        </div>}
+      </div>
+    </details>
+  );
+}
+
 /* ---------- one produced song ---------- */
-function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar }) {
+function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar, onReviewSubmit, onReviewCopy, onReviewApply }) {
   const A = window.AWEN;
   const ai = song.ai;
   const sunoRecipe = ai ? normalizeSunoRecipe(ai.suno?.recipe, {
@@ -3120,6 +3412,9 @@ function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar }) {
           </div>
 
           <SunoBridgePanel recipe={sunoRecipe} />
+
+          {onReviewSubmit && <PromptReviewPanel song={song} onSubmit={onReviewSubmit}
+            onCopyInstruction={onReviewCopy} onApply={onReviewApply} />}
 
           <details className="suno-asset-fold">
             <summary>发布素材 · Cover / Video / Thumbnail / 文件名 / YouTube</summary>
@@ -3188,7 +3483,7 @@ function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar }) {
   );
 }
 
-Object.assign(window, { RecipeBar, Skeleton, SongCard, STATUS_ORDER, Tooltip });
+Object.assign(window, { RecipeBar, Skeleton, SongCard, PromptReviewPanel, STATUS_ORDER, Tooltip });
 
 </script>
 <script type="text/babel">
@@ -3986,6 +4281,7 @@ function loadState() {
 /* ========== AI PROVIDER CONFIG ========== */
 const AI_PROVIDER_STORE_KEY = 'awen_ai_provider_v1';
 const GH_REPO_DEFAULT = 'awenstudio/product-awen-music';
+const PROMPT_REVIEW_REPO_DEFAULT = '';
 
 function normalizeGitHubRepo(value) {
   const repo = String(value || '').trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '');
@@ -4164,6 +4460,9 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
   const [patVal, setPatVal] = React.useState('');
   const [repoVal, setRepoVal] = React.useState(GH_REPO_DEFAULT);
   const [patError, setPatError] = React.useState('');
+  const [reviewRepoVal, setReviewRepoVal] = React.useState(PROMPT_REVIEW_REPO_DEFAULT);
+  const [reviewPatVal, setReviewPatVal] = React.useState('');
+  const [reviewError, setReviewError] = React.useState('');
   const [sunoRoute, setSunoRoute] = React.useState(SUNO_RECIPE_DEFAULTS.lyricsRoute);
   const [sunoWeirdness, setSunoWeirdness] = React.useState(SUNO_RECIPE_DEFAULTS.weirdness);
   const [sunoStyleInfluence, setSunoStyleInfluence] = React.useState(SUNO_RECIPE_DEFAULTS.styleInfluence);
@@ -4181,6 +4480,9 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
     setProviderError('');
     setRepoVal(localStorage.getItem('github_repo') || GH_REPO_DEFAULT);
     setPatError('');
+    setReviewRepoVal(localStorage.getItem('prompt_review_github_repo') || PROMPT_REVIEW_REPO_DEFAULT);
+    setReviewPatVal('');
+    setReviewError('');
     const sd = normalizeSunoDefaults(sunoDefaults || loadSunoDefaults());
     setSunoRoute(sd.lyricsRoute);
     setSunoWeirdness(sd.weirdness);
@@ -4192,6 +4494,8 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
   const currentProvider = loadAIProviderConfig();
   const currentPat = localStorage.getItem('github_pat') || '';
   const currentRepo = normalizeGitHubRepo(localStorage.getItem('github_repo')) || GH_REPO_DEFAULT;
+  const currentReviewPat = localStorage.getItem('prompt_review_github_pat') || '';
+  const currentReviewRepo = normalizeGitHubRepo(localStorage.getItem('prompt_review_github_repo')) || PROMPT_REVIEW_REPO_DEFAULT;
   const isOfficialPreset = providerId !== 'custom';
 
   function chooseProvider(id) {
@@ -4248,6 +4552,14 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
     if (v) localStorage.setItem('github_pat', v);
     localStorage.setItem('github_repo', repo);
     setRepoVal(repo); setPatVal(''); setPatError('');
+  }
+  function saveReviewSync() {
+    const repo = normalizeGitHubRepo(reviewRepoVal);
+    if (!repo) { setReviewError('审核仓库格式应为 owner/repo。'); return; }
+    const v = reviewPatVal.trim();
+    if (v) localStorage.setItem('prompt_review_github_pat', v);
+    localStorage.setItem('prompt_review_github_repo', repo);
+    setReviewRepoVal(repo); setReviewPatVal(''); setReviewError('');
   }
   function saveSuno() {
     const clean = saveSunoDefaults({
@@ -4375,6 +4687,29 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
                 <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">
                   去 GitHub 生成 Fine-grained PAT →
                 </a>
+              </p>
+            </div>
+            <hr className="settings-divider" />
+            <div className="settings-row">
+              <span className="settings-label">Prompt 审核仓库 <span className="settings-hint">与收藏曲库分离；保存初稿、审核与批准版本</span></span>
+              <label className="settings-field full">
+                <span className="settings-hint">目标仓库</span>
+                <input className="settings-input" value={reviewRepoVal} placeholder="owner/suno-prompt-chatgpt"
+                  onChange={e => { setReviewRepoVal(e.target.value); setReviewError(''); }} />
+              </label>
+              {currentReviewPat
+                ? <span className="settings-stored">审核专用 Key：已存储 ···{currentReviewPat.slice(-6)}</span>
+                : currentPat
+                  ? <span className="settings-hint">未填写审核专用 Key，将复用已存的收藏同步凭据。</span>
+                  : <span className="settings-hint">请填写审核专用 Key，或先配置收藏同步凭据。</span>}
+              <input className="settings-input" type="password" value={reviewPatVal}
+                placeholder="可选：审核专用 github_pat_xxxx..." onChange={e => setReviewPatVal(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && saveReviewSync()} />
+              {reviewError && <div className="settings-error">{reviewError}</div>}
+              <button className="settings-save-btn" onClick={saveReviewSync} disabled={!normalizeGitHubRepo(reviewRepoVal)}>保存 Prompt 审核仓库</button>
+              <p className="settings-note">
+                当前目标：<b>{currentReviewRepo || '尚未配置'}</b>。建议为该仓库创建独立 Fine-grained PAT，
+                仅授予 <b>Contents: Read and write</b>。不会保存 ChatGPT 对话、API Key 或其他凭据。
               </p>
             </div>
           </div>
@@ -4591,8 +4926,8 @@ function App() {
     }
     return error?.message || 'GitHub 同步失败';
   }
-  async function ghFetch(method, url, body) {
-    const pat = safeLS.get('github_pat');
+  async function ghFetch(method, url, body, token) {
+    const pat = token || safeLS.get('github_pat');
     if (!pat) throw new Error('需要 GitHub PAT');
     const res = await fetch(url, {
       method,
@@ -4722,6 +5057,189 @@ function App() {
     if (!safeLS.get('github_pat')) return;
     try { await _writeLibrary(updated, libSha); }
     catch (e) { pushToast(`发布日期已保存在本机；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 }); }
+  }
+
+  // Prompt review sync is deliberately separate from the favourites library.
+  // It stores versioned Markdown artifacts and a small manifest; no API keys,
+  // cookies, or conversation transcripts are included in those artifacts.
+  const REVIEW_MANIFEST_PATH = 'manifest.json';
+  function getPromptReviewRepo() {
+    return normalizeGitHubRepo(safeLS.get('prompt_review_github_repo')) || PROMPT_REVIEW_REPO_DEFAULT;
+  }
+  function getPromptReviewToken() {
+    return safeLS.get('prompt_review_github_pat') || safeLS.get('github_pat');
+  }
+  function promptReviewSyncMessage(error) {
+    const repo = getPromptReviewRepo() || '审核仓库';
+    if (error?.status === 403 || error?.status === 404) {
+      return `GitHub 无权访问 ${repo}。请在设置中确认审核仓库，并让 PAT 授予 Contents: Read and write。`;
+    }
+    return error?.message || 'Prompt 审核同步失败';
+  }
+  function reviewContentUrl(path) {
+    const repo = getPromptReviewRepo();
+    if (!repo) throw new Error('请先在设置中配置 Prompt 审核仓库。');
+    const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
+    return `https://api.github.com/repos/${repo}/contents/${safePath}`;
+  }
+  async function reviewGhFetch(method, path, body) {
+    const token = getPromptReviewToken();
+    if (!token) throw new Error('需要 GitHub PAT；请先配置收藏同步凭据或审核专用 PAT。');
+    return ghFetch(method, reviewContentUrl(path), body, token);
+  }
+  async function readReviewFile(path) {
+    try {
+      const data = await reviewGhFetch('GET', path);
+      return { sha: data.sha, text: fromBase64Utf8(data.content || '') };
+    } catch (e) {
+      if (e.status === 404) return null;
+      throw e;
+    }
+  }
+  async function writeReviewFile(path, text, message, sha) {
+    return reviewGhFetch('PUT', path, {
+      message,
+      content: toBase64Utf8(text),
+      ...(sha ? { sha } : {}),
+    });
+  }
+  async function readReviewManifest() {
+    const remote = await readReviewFile(REVIEW_MANIFEST_PATH);
+    if (!remote) return { sha: null, manifest: { version: 1, updatedAt: null, prompts: [] } };
+    try {
+      const parsed = JSON.parse(remote.text);
+      return {
+        sha: remote.sha,
+        manifest: {
+          version: 1,
+          updatedAt: parsed.updatedAt || null,
+          prompts: Array.isArray(parsed.prompts) ? parsed.prompts : [],
+        },
+      };
+    } catch (e) {
+      throw new Error('审核仓库的 manifest.json 不是有效 JSON。');
+    }
+  }
+  async function upsertReviewManifest(review) {
+    const remote = await readReviewManifest();
+    const entry = {
+      key: review.key,
+      id: review.id,
+      title: review.title,
+      status: review.status,
+      sourceHash: review.sourceHash,
+      sourceFile: review.sourcePath,
+      latestReviewFile: review.latestReviewPath || null,
+      approvedFile: review.approvedPath || null,
+      reviewCount: review.reviewCount || 0,
+      updatedAt: new Date().toISOString(),
+    };
+    const index = remote.manifest.prompts.findIndex(item => item?.key === review.key);
+    const prompts = index < 0
+      ? [entry, ...remote.manifest.prompts]
+      : remote.manifest.prompts.map((item, i) => i === index ? { ...item, ...entry } : item);
+    const manifest = { version: 1, updatedAt: entry.updatedAt, prompts };
+    await writeReviewFile(REVIEW_MANIFEST_PATH, JSON.stringify(manifest, null, 2) + '\n',
+      `review: update manifest for ${review.id}`, remote.sha);
+  }
+  function reviewRepoReady() {
+    if (!getPromptReviewRepo()) {
+      pushToast('请先在 ⚙ 设置中填写 Prompt 审核仓库。', { kind: 'warn', duration: 8000 });
+      return false;
+    }
+    if (!getPromptReviewToken()) {
+      pushToast('请先配置 GitHub PAT，才能推送 Prompt 审核记录。', { kind: 'warn', duration: 8000 });
+      return false;
+    }
+    return true;
+  }
+  async function submitPromptReview(songId) {
+    const song = songs.find(item => item.id === songId);
+    if (!song?.ai) { pushToast('该曲目尚未生成完成，不能提交审核。', { kind: 'warn' }); return false; }
+    if (!reviewRepoReady()) return false;
+    const nextDraft = buildPromptReviewDraft(song);
+    const previous = song.promptReview;
+    const review = previous?.sourceHash === nextDraft.sourceHash
+      ? { ...previous, status: 'in_review', submittedAt: previous.submittedAt || nextDraft.submittedAt }
+      : nextDraft;
+    try {
+      const remote = await readReviewFile(review.sourcePath);
+      await writeReviewFile(review.sourcePath, renderReviewDraftMarkdown(review),
+        `review: submit ${review.id} for ChatGPT audit`, remote?.sha);
+      await upsertReviewManifest(review);
+      setSongs(prev => prev.map(item => item.id === songId ? { ...item, promptReview: review } : item));
+      pushToast(`已将「${review.title}」提交到 Prompt 审核仓库。`);
+      return true;
+    } catch (e) {
+      pushToast(`提交审核失败：${promptReviewSyncMessage(e)}`, { kind: 'error', duration: 10000 });
+      return false;
+    }
+  }
+  async function copyPromptReviewInstruction(songId) {
+    const song = songs.find(item => item.id === songId);
+    const review = song?.promptReview;
+    const repo = getPromptReviewRepo();
+    if (!review || !repo) { pushToast('请先提交初稿并配置审核仓库。', { kind: 'warn' }); return; }
+    const instruction = `你是 Study With Me Suno Prompt 编辑。请审核 GitHub 仓库 ${repo} 中的文件 ${review.sourcePath}，严格遵守 REVIEW_POLICY.md，并参考 schemas/review-v1.json。只返回有效 JSON，不要 Markdown 围栏。必须保留 id 为 ${review.id}、sourceHash 为 ${review.sourceHash}；不要编造 reviewedAt。`;
+    const copied = await copyText(instruction);
+    pushToast(copied ? 'ChatGPT 审核指令已复制。' : '无法自动复制，请手动复制审核指令。');
+  }
+  async function applyPromptReview(songId, rawJson) {
+    const song = songs.find(item => item.id === songId);
+    const review = song?.promptReview;
+    if (!song?.ai || !review) { pushToast('请先提交该曲目的初稿。', { kind: 'warn' }); return false; }
+    if (!reviewRepoReady()) return false;
+    let result;
+    try {
+      const stripped = String(rawJson || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+      result = validatePromptReviewResult(JSON.parse(stripped), review);
+    } catch (e) {
+      pushToast(`审核 JSON 无法应用：${e.message || e}`, { kind: 'error', duration: 10000 });
+      return false;
+    }
+    const revision = (review.reviewCount || 0) + 1;
+    const reviewPath = `reviews/${review.key}-r${String(revision).padStart(2, '0')}.json`;
+    const isApproved = result.decision === 'approve' || result.decision === 'approve_with_changes';
+    const approvedPath = isApproved ? `prompts/approved/${review.key}-r${String(revision).padStart(2, '0')}.md` : null;
+    try {
+      await writeReviewFile(reviewPath, JSON.stringify({ schemaVersion: 1, revision, ...result }, null, 2) + '\n',
+        `review: record ${review.id} r${String(revision).padStart(2, '0')}`);
+      if (isApproved) {
+        const previousRecipe = normalizeSunoRecipe(song.ai.suno?.recipe, {
+          lyrics: song.ai.suno?.lyrics || song.ai.suno?.structure,
+          style: song.ai.suno?.style,
+          exclude: song.ai.suno?.exclude,
+          title: song.ai.title,
+          workspace: 'Awen · Singles',
+        });
+        const approvedRecipe = normalizeSunoRecipe({
+          ...previousRecipe,
+          ...result.revised,
+          lyricsSkeleton: result.revised.lyricsRoute === 'structure-prompt' ? previousRecipe.lyricsSkeleton : '',
+          title: previousRecipe.title,
+          workspace: previousRecipe.workspace,
+        });
+        await writeReviewFile(approvedPath, renderApprovedReviewMarkdown(review, result, revision),
+          `review: approve ${review.id} r${String(revision).padStart(2, '0')}`);
+        const nextReview = { ...review, status: 'approved', latestReviewPath: reviewPath, approvedPath, reviewCount: revision, lastReview: result };
+        await upsertReviewManifest(nextReview);
+        setSongs(prev => prev.map(item => item.id === songId ? {
+          ...item,
+          ai: { ...item.ai, suno: { ...item.ai.suno, style: approvedRecipe.style, exclude: approvedRecipe.exclude, recipe: approvedRecipe } },
+          promptReview: nextReview,
+        } : item));
+        pushToast(`已应用 ChatGPT 修改，并推送批准版本 r${String(revision).padStart(2, '0')}。`);
+      } else {
+        const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, reviewCount: revision, lastReview: result };
+        await upsertReviewManifest(nextReview);
+        setSongs(prev => prev.map(item => item.id === songId ? { ...item, promptReview: nextReview } : item));
+        pushToast('审核结论已记录；原始 Suno 配方保持不变。');
+      }
+      return true;
+    } catch (e) {
+      pushToast(`保存审核结果失败：${promptReviewSyncMessage(e)}`, { kind: 'error', duration: 10000 });
+      return false;
+    }
   }
   React.useEffect(() => { if (mode === 'library') loadLibrary(); }, [mode]);
 
@@ -5375,7 +5893,8 @@ Calm, warm, instrumental, no vocals.`;
 
         <div className="feed-list">
               {songs.map((s) =>
-          <SongCard key={s.id} song={s} onStatus={setStatus} onDelete={removeSong} onPin={setPinSong} onRemix={remixSong} onStar={addToLibrary} />
+          <SongCard key={s.id} song={s} onStatus={setStatus} onDelete={removeSong} onPin={setPinSong} onRemix={remixSong} onStar={addToLibrary}
+            onReviewSubmit={submitPromptReview} onReviewCopy={copyPromptReviewInstruction} onReviewApply={applyPromptReview} />
           )}
             </div>
         }
