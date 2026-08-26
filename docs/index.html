@@ -346,6 +346,8 @@
   .suno-field-target{ font-family:var(--font-mono); font-size:9.5px; color:var(--ink-faint); flex:1; }
   .suno-field-value{ font-family:var(--font-mono); font-size:11px; line-height:1.55; color:var(--ink-dim);
                      white-space:pre-wrap; word-break:break-word; }
+  .suno-prompt-id{ margin-left:8px; font-family:var(--font-mono); font-size:10.5px; color:var(--ink-faint); letter-spacing:.04em; }
+  .suno-prompt-id b{ color:var(--accent); font-weight:700; }
   .suno-param-grid{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; }
   .suno-param{ border:1px solid var(--line); border-radius:8px; background:var(--panel2); padding:8px 9px; }
   .suno-param-label{ display:block; font-size:9px; color:var(--ink-faint); margin-bottom:3px; }
@@ -356,6 +358,8 @@
   .suno-asset-fold>summary::-webkit-details-marker,.track-suno-fold>summary::-webkit-details-marker{ display:none; }
   .suno-asset-fold>summary::before,.track-suno-fold>summary::before{ content:'＋'; color:var(--accent); margin-right:7px; }
   .suno-asset-fold[open]>summary::before,.track-suno-fold[open]>summary::before{ content:'−'; }
+  .review-approved-check{ color:#ff5a68; font-weight:800; margin-left:4px; }
+  .review-applied-star{ margin-left:4px; }
   .suno-asset-body{ padding:0 11px 11px; }
   .track-suno-fold{ grid-column:1 / -1; width:100%; }
   .track-suno-fold .suno-bridge{ margin:0; border:none; border-top:1px solid var(--line); border-radius:0; }
@@ -3143,21 +3147,22 @@ function sunoRecipeChecklist(recipe, route) {
   return `${lyrics}\n\n[STYLE]\n${r.style}\n\n[EXCLUDE STYLES]\n${r.exclude}\n\n[WEIRDNESS]\n${r.weirdness}%\n\n[STYLE INFLUENCE]\n${r.styleInfluence}%\n\n[DURATION]\n${sunoDurationLabel(r.durationSec)}\n\n[SONG TITLE]\n${r.title}\n\n[SAVE TO WORKSPACE]\n${r.workspace}`;
 }
 
-function SunoField({ step, label, target, value, copyLabel }) {
+function SunoField({ step, label, target, value, copyLabel, copyText, promptId }) {
+  const textToCopy = copyText || value;
   return (
     <div className="suno-field">
       <div className="suno-field-head">
         <span className="suno-step">{step}</span>
         <span className="suno-field-label">{label}</span>
         <span className="suno-field-target">→ {target}</span>
-        {value && <CopyBtn text={value} label={copyLabel || '复制'} />}
+        {textToCopy && <CopyBtn text={textToCopy} label={copyLabel || '复制'} />}
       </div>
-      {value && <div className="suno-field-value">{value}</div>}
+      {value && <div className="suno-field-value">{value}{promptId && <span className="suno-prompt-id">· <b>{promptId}</b></span>}</div>}
     </div>
   );
 }
 
-function SunoBridgePanel({ recipe, compact = false }) {
+function SunoBridgePanel({ recipe, compact = false, promptId = '' }) {
   const normalized = normalizeSunoRecipe(recipe);
   const [route, setRoute] = React.useState(normalized.lyricsRoute);
   const isStructure = route === 'structure-prompt';
@@ -3206,7 +3211,8 @@ function SunoBridgePanel({ recipe, compact = false }) {
             <div className="suno-param"><span className="suno-param-label">DURATION</span><span className="suno-param-value">{sunoDurationLabel(normalized.durationSec)}</span></div>
           </div>
         </div>
-        <SunoField step="5" label="Song Title" target="Song Title" value={normalized.title} copyLabel="Copy Song Title" />
+        <SunoField step="5" label="Song Title" target="Song Title" value={normalized.title} copyLabel="Copy Song Title"
+          promptId={promptId} copyText={promptId ? `${normalized.title} · ${promptId}` : normalized.title} />
         <SunoField step="6" label="Workspace" target="Save to…" value={normalized.workspace} copyLabel="复制 Workspace" />
       </div>
     </section>
@@ -3292,13 +3298,15 @@ function LibCard({ item, onRemove, onSetPublished }) {
 }
 
 /* ---------- Prompt review panel ---------- */
-function PromptReviewPanel({ song, onSubmit, onCopyInstruction, onApply }) {
+function PromptReviewPanel({ song, onSubmit, onCopyInstruction, onApply, onMarkApplied }) {
   const [reviewJson, setReviewJson] = React.useState('');
   const [applying, setApplying] = React.useState(false);
+  const [markingApplied, setMarkingApplied] = React.useState(false);
   const review = song.promptReview;
   const statusLabel = {
     in_review: '待 ChatGPT 审核',
     approved: '已批准',
+    applied_to_suno: '已应用 Suno',
     needs_revision: '需要修改',
     rejected: '未通过',
   }[review?.status] || '尚未提交';
@@ -3311,9 +3319,17 @@ function PromptReviewPanel({ song, onSubmit, onCopyInstruction, onApply }) {
       setApplying(false);
     }
   };
+  const markApplied = async () => {
+    setMarkingApplied(true);
+    try {
+      await onMarkApplied(song.id);
+    } finally {
+      setMarkingApplied(false);
+    }
+  };
   return (
     <details className="suno-asset-fold prompt-review-fold">
-      <summary>ChatGPT 审核 · {statusLabel}</summary>
+      <summary>ChatGPT 审核 · {statusLabel}{review?.status === 'approved' && <span className="review-approved-check" aria-label="ChatGPT 审核已批准">✓</span>}{review?.status === 'applied_to_suno' && <span className="review-applied-star" aria-label="已应用 Suno">🌟</span>}</summary>
       <div className="suno-asset-body">
         <div className="settings-note" style={{marginBottom:10}}>
           {review
@@ -3325,6 +3341,9 @@ function PromptReviewPanel({ song, onSubmit, onCopyInstruction, onApply }) {
             {review ? '提交当前版本复审' : '提交 ChatGPT 审核'}
           </button>
           {review && <button className="settings-clear-btn" onClick={() => onCopyInstruction(song.id)}>复制 ChatGPT 审核指令</button>}
+          {review?.status === 'approved' && <button className="settings-clear-btn" onClick={markApplied} disabled={markingApplied}>
+            {markingApplied ? '正在同步…' : '标记为已应用 Suno'}
+          </button>}
         </div>
         {review && <div className="block" style={{marginTop:12}}>
           <div className="block-head">
@@ -3348,7 +3367,7 @@ function PromptReviewPanel({ song, onSubmit, onCopyInstruction, onApply }) {
 }
 
 /* ---------- one produced song ---------- */
-function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar, onReviewSubmit, onReviewCopy, onReviewApply }) {
+function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar, onReviewSubmit, onReviewCopy, onReviewApply, onReviewMarkApplied }) {
   const A = window.AWEN;
   const ai = song.ai;
   const sunoRecipe = ai ? normalizeSunoRecipe(ai.suno?.recipe, {
@@ -3411,10 +3430,10 @@ function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar, onReviewSu
             {tags.map(t => <span key={t.code} className="tag"><b>{t.code}</b>{t.val}</span>)}
           </div>
 
-          <SunoBridgePanel recipe={sunoRecipe} />
+          <SunoBridgePanel recipe={sunoRecipe} promptId={song.id} />
 
           {onReviewSubmit && <PromptReviewPanel song={song} onSubmit={onReviewSubmit}
-            onCopyInstruction={onReviewCopy} onApply={onReviewApply} />}
+            onCopyInstruction={onReviewCopy} onApply={onReviewApply} onMarkApplied={onReviewMarkApplied} />}
 
           <details className="suno-asset-fold">
             <summary>发布素材 · Cover / Video / Thumbnail / 文件名 / YouTube</summary>
@@ -4278,6 +4297,34 @@ function loadState() {
   try {return JSON.parse(localStorage.getItem(STORE_KEY)) || null;} catch (e) {return null;}
 }
 
+function promptIdNumber(id) {
+  const match = String(id || '').match(/^AWN-(\d+)$/i);
+  return match ? Number(match[1]) : 0;
+}
+function promptIdFor(sequence) {
+  return `AWN-${String(Math.max(1, Number(sequence) || 1)).padStart(4, '0')}`;
+}
+function nextPromptSequence(items, savedSequence) {
+  const highestAssigned = (items || []).reduce((highest, item) => Math.max(highest, promptIdNumber(item?.id)), 0);
+  return Math.max(1, Number(savedSequence) || 1, highestAssigned + 1);
+}
+function normalizedSongTitle(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+function uniqueSongTitle(title, promptId, items) {
+  const base = String(title || promptId || 'Untitled').trim() || promptId || 'Untitled';
+  const usedTitles = new Set((items || [])
+    .filter(item => item?.id !== promptId && item?.ai?.title)
+    .map(item => normalizedSongTitle(item.ai.title)));
+  if (!usedTitles.has(normalizedSongTitle(base))) return base;
+  let candidate = `${base} · ${promptId}`;
+  let suffix = 2;
+  while (usedTitles.has(normalizedSongTitle(candidate))) {
+    candidate = `${base} · ${promptId}-${suffix++}`;
+  }
+  return candidate;
+}
+
 /* ========== AI PROVIDER CONFIG ========== */
 const AI_PROVIDER_STORE_KEY = 'awen_ai_provider_v1';
 const GH_REPO_DEFAULT = 'awenstudio/product-awen-music';
@@ -4800,7 +4847,7 @@ function App() {
   const [moodKey, setMoodKey]       = React.useState(saved?.moodKey    || 'focused');
   const [purposeKey, setPurposeKey] = React.useState(saved?.purposeKey || 'study');
   const [albumSeq, setAlbumSeq] = React.useState(saved?.albumSeq || 1);
-  const [seq, setSeq] = React.useState(saved?.seq || 1);
+  const [seq, setSeq] = React.useState(() => nextPromptSequence(saved?.songs, saved?.seq));
   const [songPubSeq, setSongPubSeq] = React.useState(saved?.songPubSeq || 1);
   const [albumPubSeq, setAlbumPubSeq] = React.useState(saved?.albumPubSeq || 1);
   const [busy, setBusy] = React.useState(false);
@@ -5131,6 +5178,8 @@ function App() {
       sourceFile: review.sourcePath,
       latestReviewFile: review.latestReviewPath || null,
       approvedFile: review.approvedPath || null,
+      applicationFile: review.applicationPath || null,
+      appliedAt: review.appliedAt || null,
       reviewCount: review.reviewCount || 0,
       updatedAt: new Date().toISOString(),
     };
@@ -5160,7 +5209,7 @@ function App() {
     const nextDraft = buildPromptReviewDraft(song);
     const previous = song.promptReview;
     const review = previous?.sourceHash === nextDraft.sourceHash
-      ? { ...previous, status: 'in_review', submittedAt: previous.submittedAt || nextDraft.submittedAt }
+      ? { ...previous, status: 'in_review', submittedAt: previous.submittedAt || nextDraft.submittedAt, applicationPath: null, appliedAt: null }
       : nextDraft;
     try {
       const remote = await readReviewFile(review.sourcePath);
@@ -5221,7 +5270,7 @@ function App() {
         });
         await writeReviewFile(approvedPath, renderApprovedReviewMarkdown(review, result, revision),
           `review: approve ${review.id} r${String(revision).padStart(2, '0')}`);
-        const nextReview = { ...review, status: 'approved', latestReviewPath: reviewPath, approvedPath, reviewCount: revision, lastReview: result };
+        const nextReview = { ...review, status: 'approved', latestReviewPath: reviewPath, approvedPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result };
         await upsertReviewManifest(nextReview);
         setSongs(prev => prev.map(item => item.id === songId ? {
           ...item,
@@ -5230,7 +5279,7 @@ function App() {
         } : item));
         pushToast(`已应用 ChatGPT 修改，并推送批准版本 r${String(revision).padStart(2, '0')}。`);
       } else {
-        const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, reviewCount: revision, lastReview: result };
+        const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result };
         await upsertReviewManifest(nextReview);
         setSongs(prev => prev.map(item => item.id === songId ? { ...item, promptReview: nextReview } : item));
         pushToast('审核结论已记录；原始 Suno 配方保持不变。');
@@ -5238,6 +5287,38 @@ function App() {
       return true;
     } catch (e) {
       pushToast(`保存审核结果失败：${promptReviewSyncMessage(e)}`, { kind: 'error', duration: 10000 });
+      return false;
+    }
+  }
+  async function markPromptReviewApplied(songId) {
+    const song = songs.find(item => item.id === songId);
+    const review = song?.promptReview;
+    if (!review || review.status !== 'approved' || !review.approvedPath) {
+      pushToast('只有已批准的审核版本可以标记为已应用 Suno。', { kind: 'warn' });
+      return false;
+    }
+    if (!reviewRepoReady()) return false;
+    const appliedAt = new Date().toISOString();
+    const applicationPath = `reviews/${review.key}-r${String(review.reviewCount || 0).padStart(2, '0')}-applied-to-suno.json`;
+    const applicationRecord = {
+      schemaVersion: 1,
+      event: 'applied_to_suno',
+      id: review.id,
+      sourceHash: review.sourceHash,
+      approvedFile: review.approvedPath,
+      appliedAt,
+    };
+    try {
+      const existing = await readReviewFile(applicationPath);
+      await writeReviewFile(applicationPath, JSON.stringify(applicationRecord, null, 2) + '\n',
+        `review: mark ${review.id} as applied to Suno`, existing?.sha);
+      const nextReview = { ...review, status: 'applied_to_suno', applicationPath, appliedAt };
+      await upsertReviewManifest(nextReview);
+      setSongs(prev => prev.map(item => item.id === songId ? { ...item, promptReview: nextReview } : item));
+      pushToast('已标记为“已应用 Suno”，并同步推送到 GitHub。');
+      return true;
+    } catch (e) {
+      pushToast(`同步“已应用 Suno”状态失败：${promptReviewSyncMessage(e)}`, { kind: 'error', duration: 10000 });
       return false;
     }
   }
@@ -5443,8 +5524,9 @@ No vocals. Cover / video / thumbnail MUST share the same visual identity.`;
 
   async function generate() {
     if (busy) return;
-    const id = 'AWN-' + String(seq).padStart(4, '0');
-    setSeq((n) => n + 1);
+    const nextSequence = nextPromptSequence(songs, seq);
+    const id = promptIdFor(nextSequence);
+    setSeq(nextSequence + 1);
     const baseSel = { ...sel };
     const muts = A.mutations(baseSel);
     const lineage = mode === 'decompose' ?
@@ -5467,9 +5549,18 @@ No vocals. Cover / video / thumbnail MUST share the same visual identity.`;
     }
     const genTime = ai ? ((Date.now() - _genStart) / 1000).toFixed(1) : null;
     if (!ai) ai = A.fallbackPrompt(baseSel);
-    ai = attachSongSunoRecipe(ai, sunoDefaults);
 
-    setSongs((prev) => prev.map((x) => x.id === id ? { ...x, generating: false, ai, genTime, createdAt: new Date().toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) } : x));
+    setSongs((prev) => {
+      const title = uniqueSongTitle(ai.title, id, prev);
+      const preparedAi = attachSongSunoRecipe({ ...ai, title }, sunoDefaults);
+      return prev.map((x) => x.id === id ? {
+        ...x,
+        generating: false,
+        ai: preparedAi,
+        genTime,
+        createdAt: new Date().toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' })
+      } : x);
+    });
     setBusy(false);
   }
 
@@ -5894,7 +5985,7 @@ Calm, warm, instrumental, no vocals.`;
         <div className="feed-list">
               {songs.map((s) =>
           <SongCard key={s.id} song={s} onStatus={setStatus} onDelete={removeSong} onPin={setPinSong} onRemix={remixSong} onStar={addToLibrary}
-            onReviewSubmit={submitPromptReview} onReviewCopy={copyPromptReviewInstruction} onReviewApply={applyPromptReview} />
+            onReviewSubmit={submitPromptReview} onReviewCopy={copyPromptReviewInstruction} onReviewApply={applyPromptReview} onReviewMarkApplied={markPromptReviewApplied} />
           )}
             </div>
         }
