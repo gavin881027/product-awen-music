@@ -3164,6 +3164,7 @@ function SunoField({ step, label, target, value, copyLabel, copyText, promptId }
 
 function SunoBridgePanel({ recipe, compact = false, promptId = '' }) {
   const normalized = normalizeSunoRecipe(recipe);
+  const titleHasPromptId = titleAlreadyHasPromptId(normalized.title, promptId);
   const [route, setRoute] = React.useState(normalized.lyricsRoute);
   const isStructure = route === 'structure-prompt';
   const checklist = sunoRecipeChecklist(normalized, route);
@@ -3212,7 +3213,7 @@ function SunoBridgePanel({ recipe, compact = false, promptId = '' }) {
           </div>
         </div>
         <SunoField step="5" label="Song Title" target="Song Title" value={normalized.title} copyLabel="Copy Song Title"
-          promptId={promptId} copyText={promptId ? `${normalized.title} · ${promptId}` : normalized.title} />
+          promptId={titleHasPromptId ? '' : promptId} copyText={songTitleWithPromptId(normalized.title, promptId)} />
         <SunoField step="6" label="Workspace" target="Save to…" value={normalized.workspace} copyLabel="复制 Workspace" />
       </div>
     </section>
@@ -3294,6 +3295,47 @@ function LibCard({ item, onRemove, onSetPublished }) {
         )}
       </div>
     </div>
+  );
+}
+
+/* ---------- latest approved GPT prompt ---------- */
+function GPTReviewedPromptPanel({ song }) {
+  const review = song.promptReview;
+  const revised = review?.lastReview?.revised;
+  const hasReviewedResult = ['approved', 'applied_to_suno', 'needs_revision', 'rejected'].includes(review?.status) && !!revised;
+  const reviewLabel = {
+    approved: '最新已批准版本',
+    applied_to_suno: '最新已应用版本',
+    needs_revision: '最新审核结果 · 需要修改',
+    rejected: '最新审核结果 · 未通过',
+  }[review?.status] || '尚无 GPT 审核结果';
+  const recipe = normalizeSunoRecipe(song.ai?.suno?.recipe, {
+    lyrics: song.ai?.suno?.lyrics || song.ai?.suno?.structure,
+    style: song.ai?.suno?.style,
+    exclude: song.ai?.suno?.exclude,
+    title: song.ai?.title,
+    workspace: 'Awen · Singles',
+  });
+  const structure = hasReviewedResult && revised.lyricsRoute === 'structure-prompt'
+    ? revised.structurePrompt
+    : '';
+  const style = hasReviewedResult ? revised.style : '';
+  const title = hasReviewedResult ? recipe.title : '';
+  const titleHasPromptId = titleAlreadyHasPromptId(title, song.id);
+  return (
+    <section className="suno-bridge gpt-reviewed-prompt" aria-label="GPT 审核后 Prompt">
+      <div className="suno-bridge-head">
+        <span className="suno-bridge-kicker">GPT 审核后 PROMPT</span>
+        <span className="suno-bridge-flow">{reviewLabel}</span>
+      </div>
+      <div className="suno-bridge-body">
+        <SunoField step="A" label="结构骨架" target="GPT 审核后" value={structure} copyLabel="复制结构骨架" />
+        <SunoField step="B" label="Style" target="GPT 审核后" value={style} copyLabel="Copy Style" />
+        <SunoField step="C" label="Song Title" target="GPT 审核后" value={title} copyLabel="Copy Song Title"
+          promptId={hasReviewedResult && !titleHasPromptId ? song.id : ''}
+          copyText={hasReviewedResult ? songTitleWithPromptId(title, song.id) : ''} />
+      </div>
+    </section>
   );
 }
 
@@ -3432,6 +3474,8 @@ function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar, onReviewSu
 
           <SunoBridgePanel recipe={sunoRecipe} promptId={song.id} />
 
+          <GPTReviewedPromptPanel song={song} />
+
           {onReviewSubmit && <PromptReviewPanel song={song} onSubmit={onReviewSubmit}
             onCopyInstruction={onReviewCopy} onApply={onReviewApply} onMarkApplied={onReviewMarkApplied} />}
 
@@ -3502,7 +3546,7 @@ function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar, onReviewSu
   );
 }
 
-Object.assign(window, { RecipeBar, Skeleton, SongCard, PromptReviewPanel, STATUS_ORDER, Tooltip });
+Object.assign(window, { RecipeBar, Skeleton, SongCard, PromptReviewPanel, GPTReviewedPromptPanel, STATUS_ORDER, Tooltip });
 
 </script>
 <script type="text/babel">
@@ -4310,6 +4354,16 @@ function nextPromptSequence(items, savedSequence) {
 }
 function normalizedSongTitle(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+function titleAlreadyHasPromptId(title, promptId) {
+  if (!promptId) return false;
+  const escapedId = String(promptId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:·\\s*)?${escapedId}$`, 'i').test(String(title || '').trim());
+}
+function songTitleWithPromptId(title, promptId) {
+  const normalized = String(title || '').trim();
+  if (!promptId || titleAlreadyHasPromptId(normalized, promptId)) return normalized;
+  return `${normalized} · ${promptId}`;
 }
 function uniqueSongTitle(title, promptId, items) {
   const base = String(title || promptId || 'Untitled').trim() || promptId || 'Untitled';
