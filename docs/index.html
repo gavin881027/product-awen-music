@@ -6248,6 +6248,37 @@ function App() {
     const copied = await copyText(instruction);
     pushToast(copied ? '已复制自包含审核包；直接粘贴到网页版 ChatGPT 即可，无需 GitHub 权限。' : '无法自动复制，请手动复制审核包。');
   }
+  function promptReviewResultSignature(result) {
+    // A review result can be pasted again after a partial GitHub failure. Keep
+    // the comparison deliberately limited to reviewer-controlled fields so
+    // timestamps and local UI fields never turn a successful write into a
+    // second revision.
+    return JSON.stringify({
+      sourceHash: result?.sourceHash || '',
+      decision: result?.decision || '',
+      scores: result?.scores || {},
+      revised: result?.revised || {},
+      changes: result?.changes || [],
+      risks: result?.risks || [],
+      summary: result?.summary || '',
+    });
+  }
+  function hasAppliedPromptReviewResult(review, result) {
+    if (!review || !result) return false;
+    const signature = promptReviewResultSignature(result);
+    return review.appliedResultSignature === signature
+      || (!!review.lastReview && promptReviewResultSignature(review.lastReview) === signature);
+  }
+  function albumReviewFailureText(failures) {
+    const grouped = new Map();
+    failures.forEach(({ id, error }) => {
+      const reason = promptReviewSyncMessage(error);
+      const ids = grouped.get(reason) || [];
+      ids.push(id);
+      grouped.set(reason, ids);
+    });
+    return [...grouped.entries()].map(([reason, ids]) => `${ids.join('、')}：${reason}`).join('；');
+  }
   async function applyAlbumPromptReviews(albumId, rawJson) {
     const album = findAlbumForReview(albumId);
     const tracks = album?.data?.tracks || [];
@@ -6256,7 +6287,7 @@ function App() {
       return false;
     }
     if (!reviewRepoReady()) return false;
-    let results;
+    let results, work;
     try {
       const stripped = String(rawJson || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
       const parsed = JSON.parse(stripped);
@@ -6268,47 +6299,73 @@ function App() {
         return [id, { id, review: track.promptReview }];
       }));
       const seen = new Set();
-      results.forEach(raw => {
+      work = results.map(raw => {
         if (!raw?.id || seen.has(raw.id) || !expected.has(raw.id)) throw new Error('reviews 含有重复、缺失或不属于本专辑的曲目 ID。');
         const review = expected.get(raw.id).review;
+        seen.add(raw.id);
+        // Do this check before source-hash validation: after a successful
+        // needs_revision result, its track has a new source hash by design.
+        // Pasting the same complete album JSON must still resume only the
+        // tracks that failed in the previous batch.
+        if (hasAppliedPromptReviewResult(review, raw)) return { result: raw, alreadyApplied: true };
         if (!review) throw new Error(`曲目 ${raw.id} 尚未提交，不能导入审核结果。`);
         validatePromptReviewResult(raw, review);
-        seen.add(raw.id);
+        return { result: raw, alreadyApplied: false };
       });
       if (seen.size !== expected.size) throw new Error('reviews 未覆盖专辑中的全部曲目。');
     } catch (e) {
       pushToast(`整张专辑审核 JSON 无法应用：${e.message || e}`, { kind: 'error', duration: 10000 });
       return false;
     }
+    const pending = work.filter(item => !item.alreadyApplied);
+    const alreadyApplied = work.length - pending.length;
+    if (!pending.length) {
+      pushToast('这份整张专辑审核结果已全部应用，无需重复推送。', { kind: 'info' });
+      return true;
+    }
     const failed = [];
-    for (const result of results) {
+    for (const { result } of pending) {
       // Album review is intentionally hands-off: a full GPT revision is
       // written into its track immediately and becomes the next review draft.
-      const applied = await applyPromptReview(result.id, JSON.stringify(result), { silent: true, autoAdoptNeedsRevision: true });
-      if (!applied) failed.push(result.id);
+      let failure = null;
+      const applied = await applyPromptReview(result.id, JSON.stringify(result), {
+        silent: true,
+        autoAdoptNeedsRevision: true,
+        onError: error => { failure = error; },
+      });
+      if (!applied) failed.push({ id: result.id, error: failure || new Error('未取得具体错误信息') });
     }
     if (failed.length) {
-      pushToast(`已应用 ${results.length - failed.length}/${results.length} 首审核结果；失败曲目：${failed.join('、')}。可再次粘贴同一结果重试。`, { kind: 'warn', duration: 10000 });
+      const appliedNow = pending.length - failed.length;
+      const skippedText = alreadyApplied ? `；已跳过此前成功的 ${alreadyApplied} 首` : '';
+      pushToast(`本次已应用 ${appliedNow}/${pending.length} 首${skippedText}；仍失败：${albumReviewFailureText(failed)}。可再次粘贴同一结果，仅重试失败曲目。`, { kind: 'warn', duration: 18000 });
       return false;
     }
-    pushToast(`已应用「${album.data.album}」整张专辑的 ${results.length} 首 ChatGPT 审核结果，并同步到 GitHub。`);
+    const skippedText = alreadyApplied ? `（已跳过此前成功的 ${alreadyApplied} 首）` : '';
+    pushToast(`已应用「${album.data.album}」本次待处理的 ${pending.length} 首审核结果${skippedText}，并同步到 GitHub。`);
     return true;
   }
   async function applyPromptReview(subjectId, rawJson, options = {}) {
     const silent = !!options.silent;
     const autoAdoptNeedsRevision = !!options.autoAdoptNeedsRevision;
+    const reportError = error => { if (typeof options.onError === 'function') options.onError(error); };
     const subject = findPromptReviewSubject(subjectId);
     const review = subject?.promptReview;
     if (!subject?.ai || !review) {
+      reportError(new Error('请先提交该曲目的初稿。'));
       if (!silent) pushToast('请先提交该曲目的初稿。', { kind: 'warn' });
       return false;
     }
-    if (!reviewRepoReady()) return false;
+    if (!reviewRepoReady()) {
+      reportError(new Error('Prompt 审核仓库或 PAT 尚未配置。'));
+      return false;
+    }
     let result;
     try {
       const stripped = String(rawJson || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
       result = validatePromptReviewResult(JSON.parse(stripped), review);
     } catch (e) {
+      reportError(e);
       if (!silent) pushToast(`审核 JSON 无法应用：${e.message || e}`, { kind: 'error', duration: 10000 });
       return false;
     }
@@ -6336,7 +6393,7 @@ function App() {
         });
         await writeReviewFile(approvedPath, renderApprovedReviewMarkdown(review, result, revision),
           `review: approve ${review.id} r${String(revision).padStart(2, '0')}`);
-        const nextReview = { ...review, title: approvedRecipe.title, status: 'approved', latestReviewPath: reviewPath, approvedPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, adoptedRevision: null };
+        const nextReview = { ...review, title: approvedRecipe.title, status: 'approved', latestReviewPath: reviewPath, approvedPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, appliedResultSignature: promptReviewResultSignature(result), adoptedRevision: null };
         await upsertReviewManifest(nextReview);
         updatePromptReviewSubject(subjectId, nextReview, approvedRecipe);
         if (!silent) pushToast(`已应用 ChatGPT 修改，并推送批准版本 r${String(revision).padStart(2, '0')}。`);
@@ -6371,7 +6428,7 @@ function App() {
         const nextDraft = buildPromptReviewDraft(revisedSubject);
         if (nextDraft.sourceHash === review.sourceHash) {
           // There is nothing new to submit, but preserve the reviewer result.
-          const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, adoptedRevision: null };
+          const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, appliedResultSignature: promptReviewResultSignature(result), adoptedRevision: null };
           await upsertReviewManifest(nextReview);
           updatePromptReviewSubject(subjectId, nextReview);
         } else {
@@ -6393,6 +6450,8 @@ function App() {
               sourceFile: review.sourcePath,
               reviewFile: reviewPath,
             },
+            lastReview: result,
+            appliedResultSignature: promptReviewResultSignature(result),
           };
           const adoptionPath = `reviews/${review.key}-r${String(revision).padStart(2, '0')}-auto-adopted-revision.json`;
           const adoptionRecord = {
@@ -6415,13 +6474,14 @@ function App() {
         }
         if (!silent) pushToast(`已直接写入 GPT 修改，并提交第 ${Math.max(1, Number(review.reviewRound) || 1) + 1} 轮审核。`);
       } else {
-        const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, adoptedRevision: null };
+        const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, appliedResultSignature: promptReviewResultSignature(result), adoptedRevision: null };
         await upsertReviewManifest(nextReview);
         updatePromptReviewSubject(subjectId, nextReview);
         if (!silent) pushToast('审核结论已记录；原始 Suno 配方保持不变。');
       }
       return true;
     } catch (e) {
+      reportError(e);
       if (!silent) pushToast(`保存审核结果失败：${promptReviewSyncMessage(e)}`, { kind: 'error', duration: 10000 });
       return false;
     }
