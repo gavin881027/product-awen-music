@@ -267,6 +267,8 @@
   .card-headL{ display:flex; align-items:center; gap:10px; min-width:0; }
   .card-id{ font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); letter-spacing:.05em; white-space:nowrap; }
   .card-gentime{ font-family:var(--font-mono); font-size:10px; color:var(--accent); background:var(--accent-soft); border-radius:5px; padding:2px 6px; white-space:nowrap; }
+  .card-provider{ font-family:var(--font-mono); font-size:10px; color:var(--ink-dim); background:var(--panel2); border:1px solid var(--line); border-radius:5px; padding:2px 6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:245px; }
+  .card-provider.no-ai{ color:var(--ink-faint); border-style:dashed; }
   .card-lineage{ font-family:var(--font-mono); font-size:10px; color:var(--accent);
                  background:var(--accent-soft); padding:2px 7px; border-radius:6px; }
   .card-headR{ display:flex; align-items:center; gap:8px; }
@@ -467,8 +469,17 @@
   .album{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
           padding:18px; box-shadow:var(--shadow); }
   .album-top{ display:flex; gap:18px; }
-  .album-cover{ flex:0 0 132px; }
+  .album-cover{ flex:0 0 132px; display:flex; flex-direction:column; gap:7px; }
   .album-cover .ph{ width:132px; flex-basis:132px; }
+  .album-cover-frame{ width:132px; aspect-ratio:1 / 1; border-radius:10px; overflow:hidden; position:relative; }
+  .album-cover-frame .ph{ width:100%; height:100%; }
+  .album-cover-image{ width:100%; height:100%; display:block; object-fit:cover; }
+  .album-cover-upload{ width:100%; border:1px solid var(--line2); border-radius:7px; background:var(--panel2);
+    color:var(--ink-dim); font-family:var(--font-mono); font-size:10px; padding:6px 7px; cursor:pointer; }
+  .album-cover-upload:hover{ color:var(--accent); border-color:var(--accent); }
+  .album-cover-upload:disabled{ opacity:.55; cursor:wait; }
+  .album-cover-sync{ font-family:var(--font-mono); font-size:9px; line-height:1.35; color:var(--accent); text-align:center;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .album-meta{ flex:1; min-width:0; display:flex; flex-direction:column; gap:9px; }
   .album-scene-row{ display:flex; flex-wrap:wrap; gap:8px; }
   .album-scene-chip{ font-family:var(--font-mono); font-size:11px; color:var(--ink-dim);
@@ -477,6 +488,10 @@
   .album-axis{ font-family:var(--font-mono); font-size:10px; color:var(--accent); white-space:nowrap;
                background:var(--accent-soft); padding:3px 9px; border-radius:6px; }
   .album-head-r{ display:flex; align-items:center; gap:8px; margin-left:auto; }
+  .album-provider-row{ display:flex; min-width:0; margin-top:-2px; }
+  .album-expand-btn{ border:1px solid var(--line2); border-radius:7px; background:transparent; color:var(--accent);
+    font-family:var(--font-mono); font-size:11px; line-height:1; padding:6px 9px; cursor:pointer; white-space:nowrap; }
+  .album-expand-btn:hover{ border-color:var(--accent); background:var(--accent-soft); }
   .album-title{ font-size:26px; font-weight:800; letter-spacing:-.02em; line-height:1.05; }
   .album-title.dim{ font-size:16px; font-weight:500; color:var(--ink-faint); }
   .album-concept{ font-size:13px; color:var(--ink-dim); margin-top:-3px; }
@@ -719,7 +734,7 @@
     .axis-grid{ grid-template-columns:1fr; }
     .album-top{ flex-direction:column; }
     .album-cover{ flex-basis:auto; }
-    .album-cover .ph{ width:100%; }
+    .album-cover-frame,.album-cover .ph{ width:100%; }
   }
 
   /* ============================ USAGE GUIDE ============================ */
@@ -2757,6 +2772,7 @@ function buildPromptReviewDraft(song) {
     title: String(ai.title || song?.id || 'Untitled'),
     tagline: String(ai.tagline || ''),
     createdAt: song?.createdAt || null,
+    reviewContext: song?.reviewContext || null,
     selections: song?.sel || {},
     sunoRecipe: recipe,
     prompts: {
@@ -2790,7 +2806,7 @@ function renderReviewDraftMarkdown(review) {
   return `---
 schemaVersion: 1
 id: ${review.id}
-title: ${JSON.stringify(review.title)}
+title: ${JSON.stringify(recipe.title || review.title)}
 status: in_review
 sourceHash: ${review.sourceHash}
 submittedAt: ${review.submittedAt}
@@ -2820,6 +2836,10 @@ ${recipe.exclude}
 ### Structure Prompt
 
 ${recipe.lyricsRoute === 'structure-prompt' ? recipe.structurePrompt : 'Instrumental 路线：不使用 Lyrics / Structure Prompt。'}
+
+### Song Title
+
+${recipe.title}
 
 ## Awen 原始补充 Prompt
 
@@ -2852,7 +2872,7 @@ function renderApprovedReviewMarkdown(review, result, revision) {
   return `---
 schemaVersion: 1
 id: ${review.id}
-title: ${JSON.stringify(review.title)}
+title: ${JSON.stringify(recipe.title || review.title)}
 status: ${result.decision}
 sourceHash: ${review.sourceHash}
 revision: ${revision}
@@ -2873,6 +2893,10 @@ sourceFile: ${review.sourcePath}
 ## 批准的 Suno 配方
 
 - Lyrics 路线：${recipe.lyricsRoute}
+
+### Song Title
+
+${recipe.title}
 
 ### Style
 
@@ -2915,6 +2939,9 @@ function validatePromptReviewResult(raw, review) {
   if (!['structure-prompt', 'instrumental'].includes(revised.lyricsRoute) || !reviewSafeText(revised.style) || !reviewSafeText(revised.exclude) || typeof revised.structurePrompt !== 'string') {
     throw new Error('revised 必须包含 lyricsRoute、非空 style、非空 exclude 和 structurePrompt。');
   }
+  if (revised.title != null && (typeof revised.title !== 'string' || !reviewSafeText(revised.title) || reviewSafeText(revised.title).length > 160)) {
+    throw new Error('revised.title 必须是 1–160 字符的标题。');
+  }
   if (revised.lyricsRoute === 'instrumental' && reviewSafeText(revised.structurePrompt)) {
     throw new Error('Instrumental 路线的 structurePrompt 必须为空。');
   }
@@ -2938,6 +2965,8 @@ function validatePromptReviewResult(raw, review) {
       style: reviewSafeText(revised.style),
       exclude: reviewSafeText(revised.exclude),
       structurePrompt: reviewSafeText(revised.structurePrompt),
+      // review-v1 results created before title support remain valid.
+      title: reviewSafeText(revised.title || review.title),
     },
     changes: raw.changes.map(reviewSafeText),
     risks: raw.risks.map(reviewSafeText),
@@ -3131,6 +3160,10 @@ function attachAlbumSunoRecipes(data, defaults) {
   const workspace = `Awen · ${data.album || 'Untitled Album'}`;
   const tracks = (data.tracks || []).map(tr => ({
     ...tr,
+    // New album tracks deliberately start outside the review workflow. Keeping
+    // the explicit null makes the initial "ChatGPT 审核 · 尚未提交" state
+    // durable when the album is later saved to the local/GitHub library.
+    promptReview: tr.promptReview || null,
     sunoRecipe: buildSunoRecipe({
       lyrics: tr.lyrics,
       style: tr.style || data.anchor,
@@ -3230,6 +3263,12 @@ function Skeleton() {
   );
 }
 
+function AIProviderBadge({ provider, used }) {
+  if (used === false) return <span className="card-provider no-ai">AI · 未调用 AI</span>;
+  if (provider) return <span className="card-provider">AI · {provider}</span>;
+  return <span className="card-provider no-ai">AI · 来源未记录</span>;
+}
+
 /* ---------- library card ---------- */
 function LibCard({ item, onRemove, onSetPublished }) {
   const [markingPub, setMarkingPub] = React.useState(false);
@@ -3241,6 +3280,7 @@ function LibCard({ item, onRemove, onSetPublished }) {
           <span className="card-id">{item.id}</span>
           {item.savedAt && <span className="card-id" style={{color:'var(--ink-faint)'}}>收藏 {item.savedAt}</span>}
           {item.genTime && <span className="card-gentime">⏱ {item.genTime}s</span>}
+          <AIProviderBadge provider={item.aiProvider} used={item.aiProviderUsed} />
         </div>
         <div className="card-headR">
           <button type="button" className="icon-btn" title="从曲库移除"
@@ -3299,16 +3339,26 @@ function LibCard({ item, onRemove, onSetPublished }) {
 }
 
 /* ---------- latest approved GPT prompt ---------- */
-function GPTReviewedPromptPanel({ song }) {
+function GPTReviewedPromptPanel({ song, onEditReviewed }) {
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState({ structure: '', style: '', title: '' });
   const review = song.promptReview;
-  const revised = review?.lastReview?.revised;
-  const hasReviewedResult = ['approved', 'applied_to_suno', 'needs_revision', 'rejected'].includes(review?.status) && !!revised;
-  const reviewLabel = {
+  // Once a "needs_revision" result is adopted, its recipe is the current
+  // review-facing prompt. Keep showing it during the next round instead of
+  // blanking this panel merely because the new draft is back in_review.
+  const adoptedRevision = review?.adoptedRevision || null;
+  const revised = adoptedRevision || review?.lastReview?.revised;
+  const hasReviewedResult = (!!adoptedRevision && review?.status === 'in_review') ||
+    (['approved', 'applied_to_suno', 'needs_revision', 'reject', 'rejected'].includes(review?.status) && !!revised);
+  const manualEdited = !!(adoptedRevision && adoptedRevision.manualEditedAt);
+  const reviewLabel = ({
     approved: '最新已批准版本',
     applied_to_suno: '最新已应用版本',
     needs_revision: '最新审核结果 · 需要修改',
+    reject: '最新审核结果 · 未通过',
     rejected: '最新审核结果 · 未通过',
-  }[review?.status] || '尚无 GPT 审核结果';
+  }[review?.status] || (adoptedRevision ? `已采纳修改 · 第 ${review?.reviewRound || 2} 轮待审核` : '尚无 GPT 审核结果'))
+    + (hasReviewedResult && manualEdited ? ' · 已手动修改' : '');
   const recipe = normalizeSunoRecipe(song.ai?.suno?.recipe, {
     lyrics: song.ai?.suno?.lyrics || song.ai?.suno?.structure,
     style: song.ai?.suno?.style,
@@ -3320,36 +3370,84 @@ function GPTReviewedPromptPanel({ song }) {
     ? revised.structurePrompt
     : '';
   const style = hasReviewedResult ? revised.style : '';
-  const title = hasReviewedResult ? recipe.title : '';
+  const title = hasReviewedResult ? (revised.title || recipe.title) : '';
   const titleHasPromptId = titleAlreadyHasPromptId(title, song.id);
+  const startEdit = () => {
+    setDraft({ structure: structure || '', style: style || '', title: title || '' });
+    setEditing(true);
+  };
+  const saveEdit = () => {
+    if (!onEditReviewed) { setEditing(false); return; }
+    const unchanged = draft.structure === (structure || '') && draft.style === (style || '')
+      && draft.title.trim() === (title || '');
+    if (unchanged) { setEditing(false); return; }
+    const saved = onEditReviewed(song.id, { structure: draft.structure, style: draft.style, title: draft.title });
+    if (saved !== false) setEditing(false);
+  };
   return (
     <section className="suno-bridge gpt-reviewed-prompt" aria-label="GPT 审核后 Prompt">
       <div className="suno-bridge-head">
         <span className="suno-bridge-kicker">GPT 审核后 PROMPT</span>
         <span className="suno-bridge-flow">{reviewLabel}</span>
+        {hasReviewedResult && onEditReviewed && !editing && (
+          <button type="button" className="settings-clear-btn" style={{marginLeft:'auto',padding:'3px 10px',fontSize:11}}
+            aria-pressed={editing} onClick={startEdit}>编辑</button>
+        )}
       </div>
-      <div className="suno-bridge-body">
-        <SunoField step="A" label="结构骨架" target="GPT 审核后" value={structure} copyLabel="复制结构骨架" />
-        <SunoField step="B" label="Style" target="GPT 审核后" value={style} copyLabel="Copy Style" />
-        <SunoField step="C" label="Song Title" target="GPT 审核后" value={title} copyLabel="Copy Song Title"
-          promptId={hasReviewedResult && !titleHasPromptId ? song.id : ''}
-          copyText={hasReviewedResult ? songTitleWithPromptId(title, song.id) : ''} />
-      </div>
+      {editing ? (
+        <div className="suno-bridge-body">
+          <label className="settings-field full" style={{display:'block'}}>
+            <span className="settings-hint">结构骨架 {revised.lyricsRoute !== 'structure-prompt' ? '（纯音乐路线 · 不使用结构骨架）' : ''}</span>
+            {revised.lyricsRoute !== 'structure-prompt' ? (
+              <div className="settings-hint" style={{padding:'6px 0'}}>当前为 Instrumental 稳定路线，Suno 中不粘贴 Lyrics，无需结构骨架。</div>
+            ) : (
+              <textarea className="settings-input" rows={7} value={draft.structure} style={{resize:'vertical'}}
+                onChange={e => setDraft(d => ({ ...d, structure: e.target.value }))} />
+            )}
+          </label>
+          <label className="settings-field full" style={{display:'block'}}>
+            <span className="settings-hint">Style</span>
+            <textarea className="settings-input" rows={4} value={draft.style} style={{resize:'vertical'}}
+              onChange={e => setDraft(d => ({ ...d, style: e.target.value }))} />
+          </label>
+          <label className="settings-field full" style={{display:'block'}}>
+            <span className="settings-hint">Song Title <span className="settings-stored">Prompt ID：{song.id}</span></span>
+            <input className="settings-input" type="text" value={draft.title}
+              onChange={e => setDraft(d => ({ ...d, title: e.target.value }))} />
+          </label>
+          <div className="settings-actions">
+            <button type="button" className="settings-save-btn" onClick={saveEdit}>保存修改</button>
+            <button type="button" className="settings-clear-btn" onClick={() => setEditing(false)}>取消</button>
+          </div>
+          <p className="settings-note">保存仅更新本机的审核后 Prompt 与当前 Suno 配方；不会改写 GitHub 上的历史初稿与审核文件。如需让 GPT 复审，可重新提交。</p>
+        </div>
+      ) : (
+        <div className="suno-bridge-body">
+          <SunoField step="A" label="结构骨架" target="GPT 审核后" value={structure} copyLabel="复制结构骨架" />
+          <SunoField step="B" label="Style" target="GPT 审核后" value={style} copyLabel="Copy Style" />
+          <SunoField step="C" label="Song Title" target="GPT 审核后" value={title} copyLabel="Copy Song Title"
+            promptId={hasReviewedResult && !titleHasPromptId ? song.id : ''}
+            copyText={hasReviewedResult ? songTitleWithPromptId(title, song.id) : ''} />
+        </div>
+      )}
     </section>
   );
 }
 
 /* ---------- Prompt review panel ---------- */
-function PromptReviewPanel({ song, onSubmit, onCopyInstruction, onApply, onMarkApplied }) {
+function PromptReviewPanel({ song, onSubmit, onCopyInstruction, onApply, onMarkApplied, onAdoptRevision }) {
   const [reviewJson, setReviewJson] = React.useState('');
+  const [submitting, setSubmitting] = React.useState(false);
   const [applying, setApplying] = React.useState(false);
   const [markingApplied, setMarkingApplied] = React.useState(false);
+  const [adoptingRevision, setAdoptingRevision] = React.useState(false);
   const review = song.promptReview;
   const statusLabel = {
     in_review: '待 ChatGPT 审核',
     approved: '已批准',
     applied_to_suno: '已应用 Suno',
     needs_revision: '需要修改',
+    reject: '未通过',
     rejected: '未通过',
   }[review?.status] || '尚未提交';
   const apply = async () => {
@@ -3361,12 +3459,28 @@ function PromptReviewPanel({ song, onSubmit, onCopyInstruction, onApply, onMarkA
       setApplying(false);
     }
   };
+  const submit = async () => {
+    setSubmitting(true);
+    try {
+      await onSubmit(song.id);
+    } finally {
+      setSubmitting(false);
+    }
+  };
   const markApplied = async () => {
     setMarkingApplied(true);
     try {
       await onMarkApplied(song.id);
     } finally {
       setMarkingApplied(false);
+    }
+  };
+  const adoptRevision = async () => {
+    setAdoptingRevision(true);
+    try {
+      await onAdoptRevision(song.id);
+    } finally {
+      setAdoptingRevision(false);
     }
   };
   return (
@@ -3379,8 +3493,8 @@ function PromptReviewPanel({ song, onSubmit, onCopyInstruction, onApply, onMarkA
             : '提交后会保存 Awen 初稿、生成 ChatGPT 审核指令，并保留所有批准版本。'}
         </div>
         <div className="settings-actions" style={{marginTop:0}}>
-          <button className="settings-save-btn" onClick={() => onSubmit(song.id)}>
-            {review ? '提交当前版本复审' : '提交 ChatGPT 审核'}
+          <button className="settings-save-btn" onClick={submit} disabled={submitting}>
+            {submitting ? '正在提交…' : (review ? '提交当前版本复审' : '提交 ChatGPT 审核')}
           </button>
           {review && <button className="settings-clear-btn" onClick={() => onCopyInstruction(song.id)}>复制 ChatGPT 审核指令</button>}
           {review?.status === 'approved' && <button className="settings-clear-btn" onClick={markApplied} disabled={markingApplied}>
@@ -3403,13 +3517,35 @@ function PromptReviewPanel({ song, onSubmit, onCopyInstruction, onApply, onMarkA
             </button>
           </div>
         </div>}
+        {review?.status === 'needs_revision' && review.lastReview && <div className="block" style={{marginTop:12}}>
+          <div className="block-head">
+            <div className="block-labels">
+              <span className="block-label">本轮修改建议</span>
+              <span className="field-hint">采纳后直接覆盖当前配方，并立即提交新的 GitHub 初稿复审</span>
+            </div>
+          </div>
+          {review.lastReview.summary && <div className="kv"><span className="v">{review.lastReview.summary}</span></div>}
+          {review.lastReview.changes?.length > 0 && <div className="kv" style={{marginTop:8}}><span className="v" style={{whiteSpace:'pre-wrap'}}>修改项：\n{review.lastReview.changes.map(item => `• ${item}`).join('\n')}</span></div>}
+          <div className="settings-actions">
+            <button className="settings-save-btn" onClick={adoptRevision} disabled={adoptingRevision || !onAdoptRevision}>
+              {adoptingRevision ? '正在采纳并提交…' : '应用 GPT 修改并自动提交复审'}
+            </button>
+          </div>
+        </div>}
+        {['reject', 'rejected'].includes(review?.status) && <div className="block" style={{marginTop:12}}>
+          <div className="block-head"><div className="block-labels">
+            <span className="block-label">此曲目未通过</span>
+            <span className="field-hint">拒绝结果不会覆盖当前配方；下一轮专辑审核会要求 GPT 结合 Album DNA 补出完整替代配方。</span>
+          </div></div>
+          {review.lastReview?.summary && <div className="kv"><span className="v">{review.lastReview.summary}</span></div>}
+        </div>}
       </div>
     </details>
   );
 }
 
 /* ---------- one produced song ---------- */
-function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar, onReviewSubmit, onReviewCopy, onReviewApply, onReviewMarkApplied }) {
+function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar, onReviewSubmit, onReviewCopy, onReviewApply, onReviewMarkApplied, onReviewAdoptRevision, onEditReviewed }) {
   const A = window.AWEN;
   const ai = song.ai;
   const sunoRecipe = ai ? normalizeSunoRecipe(ai.suno?.recipe, {
@@ -3435,6 +3571,7 @@ function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar, onReviewSu
             : <span className="card-id" style={{opacity:.4}}>草稿</span>}
           {song.createdAt && <span className="card-id" style={{color:'var(--ink-faint)'}}>{song.createdAt}</span>}
           {song.genTime && <span className="card-gentime">⏱ {song.genTime}s</span>}
+          <AIProviderBadge provider={song.aiProvider} used={song.aiProviderUsed} />
           {song.lineage && <span className="card-lineage">{song.lineage}</span>}
         </div>
         <div className="card-headR">
@@ -3474,10 +3611,11 @@ function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar, onReviewSu
 
           <SunoBridgePanel recipe={sunoRecipe} promptId={song.id} />
 
-          <GPTReviewedPromptPanel song={song} />
+          <GPTReviewedPromptPanel song={song} onEditReviewed={onEditReviewed} />
 
           {onReviewSubmit && <PromptReviewPanel song={song} onSubmit={onReviewSubmit}
-            onCopyInstruction={onReviewCopy} onApply={onReviewApply} onMarkApplied={onReviewMarkApplied} />}
+            onCopyInstruction={onReviewCopy} onApply={onReviewApply} onMarkApplied={onReviewMarkApplied}
+            onAdoptRevision={onReviewAdoptRevision} />}
 
           <details className="suno-asset-fold">
             <summary>发布素材 · Cover / Video / Thumbnail / 文件名 / YouTube</summary>
@@ -3679,12 +3817,142 @@ function AlbumConsole({ axisKey, count, base, busy, onAxis, onCount, onBuild }) 
   );
 }
 
+/* ---------- Album-track review subjects ---------- */
+function albumTrackPromptId(albumId, index) {
+  return `${String(albumId || 'ALB-000')}-T${String(index + 1).padStart(2, '0')}`;
+}
+
+function albumTrackReviewSubject(album, tr, index) {
+  const data = album?.data || {};
+  const workspace = data.workspace || `Awen · ${data.album || 'Untitled Album'}`;
+  const recipe = normalizeSunoRecipe(tr?.sunoRecipe, {
+    lyrics: tr?.lyrics,
+    style: tr?.style || data.anchor,
+    exclude: tr?.exclude,
+    title: tr?.title,
+    workspace,
+  });
+  const id = albumTrackPromptId(album?.id, index);
+  return {
+    id,
+    createdAt: album?.createdAt || null,
+    sel: album?.base || {},
+    reviewContext: {
+      type: 'album_track',
+      albumId: album?.id || '',
+      albumTitle: data.album || '',
+      trackNumber: index + 1,
+    },
+    promptReview: tr?.promptReview || null,
+    ai: {
+      title: tr?.title || id,
+      tagline: tr?.role || tr?.scene || '',
+      suno: {
+        lyrics: recipe.lyricsSkeleton,
+        style: recipe.style,
+        exclude: recipe.exclude,
+        prompt: tr?.prompt || '',
+        recipe,
+      },
+      cover: data.cover || '',
+      video: data.video || '',
+      thumb: data.thumb || '',
+    },
+  };
+}
+
+/* ---------- one-click album review handoff ---------- */
+function AlbumPromptReviewPanel({ album, onSubmitAll, onCopyAll, onApplyAll }) {
+  const [reviewJson, setReviewJson] = React.useState('');
+  const [submitting, setSubmitting] = React.useState(false);
+  const [applying, setApplying] = React.useState(false);
+  const tracks = album?.data?.tracks || [];
+  const submittedCount = tracks.filter(track => !!track.promptReview).length;
+  const allSubmitted = tracks.length > 0 && submittedCount === tracks.length;
+  const statusLabel = submittedCount === 0
+    ? '尚未提交'
+    : allSubmitted ? '待 ChatGPT 审核' : `已提交 ${submittedCount}/${tracks.length} 首`;
+  const submit = async () => {
+    setSubmitting(true);
+    try {
+      await onSubmitAll(album.id);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  const apply = async () => {
+    setApplying(true);
+    try {
+      const accepted = await onApplyAll(album.id, reviewJson);
+      if (accepted) setReviewJson('');
+    } finally {
+      setApplying(false);
+    }
+  };
+  return (
+    <details className="suno-asset-fold prompt-review-fold">
+      <summary>ChatGPT 审核 · {statusLabel}</summary>
+      <div className="suno-asset-body">
+        <div className="settings-note" style={{marginBottom:10}}>
+          整张专辑只需一次提交。Awen 会为 {tracks.length} 首曲目准备完整 Suno 配方，并提供一条可一次性发给 ChatGPT 的审核指令；无需逐首点击提交。
+        </div>
+        <div className="settings-actions" style={{marginTop:0}}>
+          {allSubmitted ? (
+            <span className="settings-note" style={{margin:'0 4px 0 0'}}>✓ 已一键提交 {submittedCount}/{tracks.length} 首</span>
+          ) : (
+            <button className="settings-save-btn" onClick={submit} disabled={submitting || !tracks.length}>
+              {submitting ? '正在提交整张专辑…' : (submittedCount ? `继续提交剩余 ${tracks.length - submittedCount} 首` : `一键提交 ${tracks.length} 首至 ChatGPT 审核`)}
+            </button>
+          )}
+          {allSubmitted && <button className="settings-clear-btn" onClick={() => onCopyAll(album.id)}>复制整张专辑 ChatGPT 审核指令</button>}
+        </div>
+        {!allSubmitted && submittedCount > 0 && <div className="settings-note" style={{marginTop:10}}>
+          仍有 {tracks.length - submittedCount} 首尚未提交；再次点击即可补齐，不会重置已经提交的曲目。
+        </div>}
+        {allSubmitted && <div className="block" style={{marginTop:12}}>
+          <div className="block-head">
+            <div className="block-labels">
+              <span className="block-label">导入整张专辑的 ChatGPT 审核 JSON</span>
+              <span className="field-hint">粘贴包含全部 {tracks.length} 首结果的 {`{"reviews":[...]}`}；Awen 会逐首保存结果</span>
+            </div>
+          </div>
+          <textarea className="settings-input" value={reviewJson}
+            placeholder='粘贴整张专辑的 ChatGPT 审核结果：{"reviews":[{...},{...}]}'
+            onChange={e => setReviewJson(e.target.value)} style={{minHeight:180, resize:'vertical'}} />
+          <div className="settings-actions">
+            <button className="settings-save-btn" onClick={apply} disabled={!reviewJson.trim() || applying}>
+              {applying ? '正在应用整张专辑审核…' : '应用整张专辑审核并推送'}
+            </button>
+          </div>
+        </div>}
+      </div>
+    </details>
+  );
+}
+
 /* ---------- one produced album ---------- */
-function AlbumCard({ album, onStatus, onDelete, onPin, onStar }) {
+function AlbumCard({ album, onStatus, onDelete, onPin, onStar, onCoverUpload, onReviewSubmit, onReviewCopy, onReviewApply, onReviewMarkApplied, onReviewAdoptRevision, onAlbumReviewSubmit, onAlbumReviewCopy, onAlbumReviewApply, onEditReviewed }) {
   const A = window.AWEN;
   const data = album.data;
   const status = album.status || 'Draft';
   const zh = window.I18N.isZh();
+  // Albums intentionally start compact: track-level Suno prompts appear only
+  // after the user explicitly expands this particular album card.
+  const [showAlbumPrompts, setShowAlbumPrompts] = React.useState(false);
+  const [coverUploading, setCoverUploading] = React.useState(false);
+  const coverInputRef = React.useRef(null);
+  const chooseCover = () => coverInputRef.current?.click();
+  const uploadCover = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !onCoverUpload) return;
+    setCoverUploading(true);
+    try {
+      await onCoverUpload(album.id, file);
+    } finally {
+      setCoverUploading(false);
+    }
+  };
   // PERF: only recompute metadata when the album's underlying data actually changes,
   // not on every parent re-render (status cycle, pin, language toggle).
   const metaMemo = React.useMemo(
@@ -3707,6 +3975,12 @@ function AlbumCard({ album, onStatus, onDelete, onPin, onStar }) {
     workspace: albumWorkspace,
   });
   const albumDurationSec = data?.tracks?.reduce((sum, tr) => sum + trackRecipe(tr).durationSec, 0) || 0;
+  // Once an audit has been applied, the consolidated prompt at the end of the
+  // album is the active source of truth; first-stage per-track copies can fold.
+  const hasAppliedAlbumAudit = (data?.tracks || []).some(track => {
+    const review = track?.promptReview;
+    return !!review && ((review.reviewCount || 0) > 0 || !!review.adoptedRevision || !!review.supersedes);
+  });
   const copyAll = data &&
 `=== AWEN STUDY · ALBUM ===
 ${data.album}
@@ -3752,11 +4026,204 @@ ${meta.spotifyDesc}
 ${meta.tags.join(', ')}`; })()}`;
 
   const trackSuno = (tr) => `=== ${data.album} · ${tr.title} ===\n${sunoRecipeChecklist(trackRecipe(tr))}`;
+  // This handoff package deliberately includes only the exact "approved"
+  // audit state. "Applied to Suno" is a production marker, not a new GPT
+  // approval, and needs its own review if it is to be exported again.
+  const approvedReviewTracks = (data?.tracks || []).map((tr, i) => {
+    const review = tr?.promptReview;
+    const revised = review?.lastReview?.revised;
+    if (review?.status !== 'approved' || !revised) return null;
+    const recipe = trackRecipe(tr);
+    const promptId = albumTrackPromptId(album.id, i);
+    return {
+      trackNumber: i + 1,
+      promptId,
+      structureSkeleton: revised.lyricsRoute === 'structure-prompt'
+        ? revised.structurePrompt
+        : 'Instrumental — no Lyrics / Structure Prompt.',
+      style: revised.style,
+      songTitle: songTitleWithPromptId(revised.title || recipe.title, promptId),
+    };
+  }).filter(Boolean);
+  const approvedReviewExport = JSON.stringify({
+    schemaVersion: 1,
+    exportType: 'awen-album-approved-gpt-prompts',
+    album: {
+      id: album.id,
+      title: data?.album || '',
+      exportedAt: new Date().toISOString(),
+      inclusionRule: 'Only tracks whose ChatGPT review status is approved.',
+    },
+    tracks: approvedReviewTracks,
+  }, null, 2);
+  // A revision accepted from a "needs_revision" result is immediately the
+  // current recipe, even while its follow-up review is pending. Export these
+  // tracks as one package so the second review round can be handed to another
+  // reviewer without reconstructing fields from the first-round history.
+  const resubmissionTracks = (data?.tracks || []).map((tr, i) => {
+    const review = tr?.promptReview;
+    const recipe = trackRecipe(tr);
+    const promptId = albumTrackPromptId(album.id, i);
+    const isAdoptedResubmission = review?.status === 'in_review' && !!review?.adoptedRevision && (review.reviewRound || 1) >= 2;
+    const isRejectedTrack = ['reject', 'rejected'].includes(review?.status);
+    if (!isAdoptedResubmission && !isRejectedTrack) return null;
+    return {
+      trackNumber: i + 1,
+      promptId,
+      task: isRejectedTrack ? 'regenerate_missing_prompt_from_album_context' : 'review_adopted_revision',
+      reviewRound: isRejectedTrack ? Math.max(2, (review.reviewRound || 1) + 1) : review.reviewRound,
+      sourceHash: review.sourceHash,
+      lyrics: recipe.lyricsRoute === 'structure-prompt'
+        ? recipe.structurePrompt
+        : 'Instrumental — no Lyrics / Structure Prompt.',
+      style: recipe.style,
+      excludeStyles: recipe.exclude,
+      songTitle: songTitleWithPromptId(recipe.title, promptId),
+      ...(isRejectedTrack ? {
+        rejectionSummary: review.lastReview?.summary || '',
+        rejectionRisks: review.lastReview?.risks || [],
+        instruction: 'Create a complete replacement Suno prompt aligned with the album context. Return a full revised recipe for user approval; do not leave this track rejected or blank.',
+      } : {}),
+    };
+  }).filter(Boolean);
+  const resubmissionReviewRound = resubmissionTracks.length
+    ? Math.max(...resubmissionTracks.map(track => track.reviewRound || 2))
+    : 2;
+  const resubmissionExport = JSON.stringify({
+    schemaVersion: 1,
+    exportType: 'awen-album-resubmission-prompts',
+    album: {
+      id: album.id,
+      title: data?.album || '',
+      reviewRound: resubmissionReviewRound,
+      exportedAt: new Date().toISOString(),
+      inclusionRule: 'Tracks with an adopted GPT revision, plus rejected tracks that require a complete replacement prompt.',
+      concept: data?.concept || '',
+      atmosphere: data?.atmosphere || '',
+      styleAnchor: data?.anchor || '',
+      coreMotif: data?.coreMotif || '',
+      albumDNA: data?.dna || null,
+      visualDNA: data?.visual || null,
+    },
+    tracks: resubmissionTracks,
+  }, null, 2);
+  const consolidatedAlbumPrompt = `=== AWEN STUDY · ${data?.album || 'Untitled Album'} · CURRENT ALBUM PROMPT ===
+
+[ALBUM ID]
+${album.id}
+
+[CONCEPT]
+${data?.concept || ''}
+
+[ATMOSPHERE]
+${data?.atmosphere || ''}
+
+[STYLE ANCHOR]
+${data?.anchor || ''}
+
+[ALBUM DNA]
+core motif: ${data?.coreMotif || ''}
+texture: ${data?.dna?.texture || ''}
+space: ${data?.dna?.space || ''}
+emotion: ${data?.dna?.emotion || ''}
+
+[CURRENT TRACK PROMPTS]
+${(data?.tracks || []).map((tr, i) => {
+  const review = tr?.promptReview;
+  const promptId = albumTrackPromptId(album.id, i);
+  const reviewState = review?.adoptedRevision ? `round ${review.reviewRound || 2} · adopted GPT revision · pending review`
+    : review?.status === 'approved' ? 'ChatGPT approved'
+    : ['reject', 'rejected'].includes(review?.status) ? 'replacement prompt required'
+    : review?.status === 'in_review' ? 'awaiting ChatGPT review'
+    : 'not submitted';
+  return `--- ${String(i + 1).padStart(2, '0')} · ${songTitleWithPromptId(trackRecipe(tr).title, promptId)} ---\n[TRACK ROLE] ${tr.role || ''}\n[SCENE] ${tr.scene || ''}\n[REVIEW STATE] ${reviewState}\n${sunoRecipeChecklist(trackRecipe(tr))}`;
+}).join('\n\n')}
+`;
+  // Keep the complete prompt archive easy to follow as an album moves through
+  // review. A track belongs to exactly one stage: never submitted, submitted
+  // for its first ChatGPT round, or submitted for a later round.
+  const promptStageGroups = [
+    {
+      key: 'unsubmitted',
+      label: '未提交 ChatGPT',
+      description: '尚未创建 ChatGPT 审核初稿的原始 Awen 配方。',
+      tracks: (data?.tracks || []).map((track, index) => ({ track, index }))
+        .filter(({ track }) => !track.promptReview),
+    },
+    {
+      key: 'round-one',
+      label: '第 1 轮已提交 ChatGPT',
+      description: '已进入第一轮审核，包含待审核、已批准、需要修改或未通过的第一轮记录。',
+      tracks: (data?.tracks || []).map((track, index) => ({ track, index }))
+        .filter(({ track }) => {
+          const review = track.promptReview;
+          return !!review && !review.adoptedRevision && (Number(review.reviewRound) || 1) <= 1;
+        }),
+    },
+    {
+      key: 'round-two-plus',
+      label: '第 2 轮已提交 ChatGPT',
+      description: '已采纳 GPT 修改并重新提交的配方；后续轮次也会归入这一组。',
+      tracks: (data?.tracks || []).map((track, index) => ({ track, index }))
+        .filter(({ track }) => {
+          const review = track.promptReview;
+          return !!review && (!!review.adoptedRevision || (Number(review.reviewRound) || 1) >= 2);
+        }),
+    },
+  ].map(group => ({
+    ...group,
+    prompt: `=== AWEN STUDY · ${data?.album || 'Untitled Album'} · ${group.label} ===
+
+[ALBUM ID]
+${album.id}
+
+[CONCEPT]
+${data?.concept || ''}
+
+[ATMOSPHERE]
+${data?.atmosphere || ''}
+
+[STYLE ANCHOR]
+${data?.anchor || ''}
+
+[ALBUM DNA]
+core motif: ${data?.coreMotif || ''}
+texture: ${data?.dna?.texture || ''}
+space: ${data?.dna?.space || ''}
+emotion: ${data?.dna?.emotion || ''}
+
+[TRACK PROMPTS]
+${group.tracks.length ? group.tracks.map(({ track: tr, index: i }) => {
+  const review = tr.promptReview;
+  const promptId = albumTrackPromptId(album.id, i);
+  const reviewState = !review ? 'not submitted'
+    : review.adoptedRevision ? `round ${review.reviewRound || 2} · adopted GPT revision · pending review`
+    : review.status === 'approved' ? 'ChatGPT approved'
+    : ['reject', 'rejected'].includes(review.status) ? 'ChatGPT rejected'
+    : review.status === 'needs_revision' ? 'ChatGPT requested revision'
+    : review.status === 'applied_to_suno' ? 'approved · applied to Suno'
+    : `round ${review.reviewRound || 1} · awaiting ChatGPT review`;
+  return `--- ${String(i + 1).padStart(2, '0')} · ${songTitleWithPromptId(trackRecipe(tr).title, promptId)} ---\n[TRACK ROLE] ${tr.role || ''}\n[SCENE] ${tr.scene || ''}\n[REVIEW STATE] ${reviewState}\n${sunoRecipeChecklist(trackRecipe(tr))}`;
+}).join('\n\n') : 'No tracks in this stage.'}
+`,
+  }));
 
   return (
     <div className="album">
       <div className="album-top">
-        <div className="album-cover"><Placeholder label="cover" ratio="1 / 1" /></div>
+        <div className="album-cover">
+          <div className="album-cover-frame">
+            {album.coverAsset?.previewDataUrl
+              ? <img className="album-cover-image" src={album.coverAsset.previewDataUrl} alt={`${data?.album || album.id} cover`} />
+              : <Placeholder label="cover" ratio="1 / 1" />}
+          </div>
+          <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={uploadCover} />
+          <button type="button" className="album-cover-upload" onClick={chooseCover}
+            disabled={coverUploading || album.generating || !data}>
+            {coverUploading ? '上传并推送中…' : (album.coverAsset ? '更换封面' : '上传封面')}
+          </button>
+          {album.coverAsset?.path && <div className="album-cover-sync" title={album.coverAsset.path}>GitHub ✓</div>}
+        </div>
         <div className="album-meta">
           <div className="album-head">
             {album.releaseId
@@ -3766,6 +4233,12 @@ ${meta.tags.join(', ')}`; })()}`;
             {album.genTime && <span className="card-gentime">⏱ {album.genTime}s</span>}
             <span className="album-axis">{album.axisLabel}</span>
             <div className="album-head-r">
+              {!album.generating && data && (
+                <button type="button" className="album-expand-btn" onClick={() => setShowAlbumPrompts(open => !open)}
+                  aria-expanded={showAlbumPrompts}>
+                  {showAlbumPrompts ? (zh ? '收起曲目 Prompt' : 'Hide track prompts') : (zh ? `展开 ${data.tracks.length} 首曲目 Prompt` : `Show ${data.tracks.length} track prompts`)}
+                </button>
+              )}
               <Tooltip text="点击循环切换：草稿 → 已采用 → 排队中 → 已发布">
                 <button type="button" className={'status s-' + status.toLowerCase()} onClick={cycle}
                   aria-label={'Album status: ' + status + ', click to cycle'}>
@@ -3780,6 +4253,10 @@ ${meta.tags.join(', ')}`; })()}`;
               <button type="button" className={"icon-btn" + (album.pinned ? " on" : "")} title={album.pinned ? "已锁定 — 点击解锁" : "锁定 (防误删)"} onClick={() => { if (album.pinned) { if (window.confirm('确认解锁？解锁后此专辑可被删除。')) onPin(album.id); } else { onPin(album.id); } }} style={album.pinned ? {background:"var(--accent)",borderColor:"var(--accent)",color:"var(--accent-ink)",fontSize:"13px"} : {fontSize:"13px"}}>{album.pinned ? '🔒' : '🔓'}</button>
               {!album.pinned && <button type="button" className="icon-btn" onClick={() => onDelete(album.id)}>×</button>}
             </div>
+          </div>
+
+          <div className="album-provider-row">
+            <AIProviderBadge provider={album.aiProvider} used={album.aiProviderUsed} />
           </div>
 
           {album.generating ? (
@@ -3841,7 +4318,7 @@ ${meta.tags.join(', ')}`; })()}`;
                 </div>
                 <div className="kv"><span className="v mono">{data.anchor}</span></div>
               </div>
-              <details className="suno-asset-fold">
+              <details className="suno-asset-fold" open>
                 <summary>视觉发布素材 · Cover / Video / Thumbnail</summary>
                 <div className="suno-asset-body">
                   <div className="block">
@@ -3883,7 +4360,7 @@ ${meta.tags.join(', ')}`; })()}`;
         </div>
       </div>
 
-      {!album.generating && data && (
+      {showAlbumPrompts && !album.generating && data && (
         <div className="tracklist">
           <div className="tracklist-head">
             <div className="block-labels">
@@ -3910,11 +4387,40 @@ ${meta.tags.join(', ')}`; })()}`;
                   )}
                   <span className="track-scene">{tr.scene}</span>
                 </div>
-                <details className="track-suno-fold">
-                  <summary>Suno 配方 · {trackRecipe(tr).weirdness}% / {trackRecipe(tr).styleInfluence}% / {sunoDurationLabel(trackRecipe(tr).durationSec)} · {trackRecipe(tr).workspace}</summary>
-                  <SunoBridgePanel recipe={trackRecipe(tr)} compact />
-                </details>
-                <div className="track-prompt">{tr.prompt}</div>
+                <section className="suno-asset-body" style={{padding:'12px 0 0'}} aria-label={`${tr.title} 制作信息`}>
+                  <div className="block" style={{marginBottom:12}}>
+                    <div className="block-head">
+                      <div className="block-labels">
+                        <span className="block-label">本曲制作信息</span>
+                        <span className="field-hint">曲目角色、专辑 DNA 与制作说明</span>
+                      </div>
+                    </div>
+                    <div className="kv"><span className="k">ROLE</span><span className="v">{tr.role || '—'}</span></div>
+                    <div className="kv"><span className="k">SCENE</span><span className="v">{tr.scene || '—'}</span></div>
+                    <div className="kv"><span className="k">KEY</span><span className="v">{tr.key || '—'}</span></div>
+                    <div className="kv"><span className="k">MOTIF</span><span className="v">{tr.motifMark ? `${data.coreMotif || 'Album motif'} · ${tr.motifMark}` : (data.coreMotif || '—')}</span></div>
+                    <div className="kv"><span className="k">ALBUM DNA</span><span className="v">{data.dna ? `${data.dna.texture} · ${data.dna.space} · ${data.dna.emotion}` : '—'}</span></div>
+                    {data.atmosphere && <div className="kv"><span className="k">ATMOSPHERE</span><span className="v">{data.atmosphere}</span></div>}
+                    {tr.prompt && <div className="kv"><span className="k">TRACK NOTE</span><span className="v">{tr.prompt}</span></div>}
+                  </div>
+                  {hasAppliedAlbumAudit ? (
+                    <details className="track-suno-fold">
+                      <summary>第一阶段 Suno 配方 · 已归档（查看原始生成内容）</summary>
+                      <SunoBridgePanel recipe={trackRecipe(tr)} compact promptId={albumTrackPromptId(album.id, i)} />
+                    </details>
+                  ) : (
+                    <SunoBridgePanel recipe={trackRecipe(tr)} promptId={albumTrackPromptId(album.id, i)} />
+                  )}
+                </section>
+                {(() => {
+                  const reviewSubject = albumTrackReviewSubject(album, tr, i);
+                  return <>
+                    <GPTReviewedPromptPanel song={reviewSubject} onEditReviewed={onEditReviewed} />
+                    {onReviewSubmit && reviewSubject.promptReview && (!reviewSubject.promptReview.batchAlbumId || ['needs_revision', 'reject', 'rejected', 'approved', 'applied_to_suno'].includes(reviewSubject.promptReview.status)) && <PromptReviewPanel song={reviewSubject} onSubmit={onReviewSubmit}
+                      onCopyInstruction={onReviewCopy} onApply={onReviewApply} onMarkApplied={onReviewMarkApplied}
+                      onAdoptRevision={onReviewAdoptRevision} />}
+                  </>;
+                })()}
               </div>
               <CopyBtn text={trackSuno(tr)} label="Suno" />
             </div>
@@ -3922,7 +4428,12 @@ ${meta.tags.join(', ')}`; })()}`;
         </div>
       )}
 
-      {data && data.tracks && (
+      {showAlbumPrompts && !album.generating && data && onAlbumReviewSubmit && (
+        <AlbumPromptReviewPanel album={album} onSubmitAll={onAlbumReviewSubmit}
+          onCopyAll={onAlbumReviewCopy} onApplyAll={onAlbumReviewApply} />
+      )}
+
+      {showAlbumPrompts && data && data.tracks && (
         <details className="suno-asset-fold">
           <summary>发布元数据 · YouTube / Spotify / Tags / 文件名</summary>
           <div className="suno-asset-body">
@@ -3977,11 +4488,79 @@ ${meta.tags.join(', ')}`; })()}`;
           </div>
         </details>
       )}
+
+      {showAlbumPrompts && data && data.tracks && (
+        <details className="suno-asset-fold">
+          <summary>整体导出 · ChatGPT 审核已批准（{approvedReviewTracks.length} 首）</summary>
+          <div className="suno-asset-body">
+            <div className="settings-note" style={{marginBottom:10}}>
+              仅导出状态严格为“ChatGPT 审核 · 已批准 ✓”的曲目；不包含待审核、需要修改、未通过或已应用 Suno 的曲目。
+            </div>
+            {approvedReviewTracks.length ? <>
+              <div className="settings-actions" style={{marginTop:0, marginBottom:10}}>
+                <CopyBtn text={approvedReviewExport} label="复制复审 JSON" />
+              </div>
+              <div className="kv"><span className="v" style={{fontFamily:'var(--font-mono)', whiteSpace:'pre-wrap', fontSize:11}}>{approvedReviewExport}</span></div>
+            </> : (
+              <div className="settings-note">当前专辑还没有“已批准”的曲目，因此没有可导出的复审包。</div>
+            )}
+          </div>
+        </details>
+      )}
+
+      {showAlbumPrompts && data && data.tracks && (
+        <details className="suno-asset-fold">
+          <summary>整体导出 · 第 {resubmissionReviewRound} 轮复审集合 Prompt（{resubmissionTracks.length} 首）</summary>
+          <div className="suno-asset-body">
+            <div className="settings-note" style={{marginBottom:10}}>
+              包含已采纳修改、待复审的曲目；也包含未通过曲目，并标记为“基于专辑上下文补足完整替代 Prompt”。
+            </div>
+            {resubmissionTracks.length ? <>
+              <div className="settings-actions" style={{marginTop:0, marginBottom:10}}>
+                <CopyBtn text={resubmissionExport} label={`复制第 ${resubmissionReviewRound} 轮集合 Prompt`} />
+              </div>
+              <div className="kv"><span className="v" style={{fontFamily:'var(--font-mono)', whiteSpace:'pre-wrap', fontSize:11}}>{resubmissionExport}</span></div>
+            </> : (
+              <div className="settings-note">尚未有待复审或未通过的曲目；采纳修改或出现未通过结果后会自动出现在这里。</div>
+            )}
+          </div>
+        </details>
+      )}
+
+      {showAlbumPrompts && data && data.tracks && (
+        <section className="suno-bridge" aria-label="整张专辑 Prompt 审核阶段归档">
+          <div className="suno-bridge-head">
+            <span className="suno-bridge-kicker">整张专辑 · PROMPT 阶段归档</span>
+            <span className="suno-bridge-flow">按 ChatGPT 提交轮次分类；每组内容均为可复制的完整 Prompt</span>
+          </div>
+          <div className="suno-bridge-note safe">
+            未提交、第一轮与第二轮/后续轮次互不混合。展开任一分组即可查看该阶段的专辑上下文及所有曲目配方。
+          </div>
+          <div className="suno-bridge-body">
+            {promptStageGroups.map(group => (
+              <details className="track-suno-fold prompt-stage-fold" key={group.key}>
+                <summary>{group.label}（{group.tracks.length} 首）</summary>
+                <div className="suno-asset-body">
+                  <div className="settings-note" style={{marginBottom:10}}>{group.description}</div>
+                  {group.tracks.length ? <>
+                    <div className="settings-actions" style={{marginTop:0, marginBottom:10}}>
+                      <CopyBtn text={group.prompt} label={`复制${group.label}完整 Prompt`} />
+                    </div>
+                    <div className="suno-field-value" style={{whiteSpace:'pre-wrap'}}>{group.prompt}</div>
+                  </> : (
+                    <div className="settings-note">目前没有属于这个阶段的曲目。</div>
+                  )}
+                </div>
+              </details>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
 
-Object.assign(window, { AlbumConsole, AlbumCard });
+Object.assign(window, { AlbumConsole, AlbumCard, AlbumPromptReviewPanel });
 
 </script>
 <script type="text/babel">
@@ -4398,6 +4977,19 @@ const AI_PROVIDER_PRESETS = {
     label: 'OpenCode Go · GLM-5.3', protocol: 'chat-completions',
     baseUrl: 'https://opencode.ai/zen/go/v1/chat/completions', model: 'glm-5.3'
   },
+  'zai-glm-5-3-flash': {
+    label: '智谱 BigModel Coding Plan · GLM-5.3 Flash', protocol: 'chat-completions',
+    // Coding Plan keys use their dedicated OpenAI-compatible route rather than
+    // the standard pay-as-you-go API route.
+    baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4', model: 'glm-5.3-flash'
+  },
+  'zai-glm-5-3-high': {
+    label: '智谱 BigModel Coding Plan · GLM-5.3 High', protocol: 'chat-completions',
+    // Flagship glm-5.3 on the same Coding Plan route. Requests pin
+    // reasoning_effort to 'high' (see providerPayload) so thinking stays
+    // strong but cheaper than the model's default 'max' tier.
+    baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4', model: 'glm-5.3'
+  },
   'opencode-go-mimo': {
     label: 'OpenCode Go · MiMo-V2.5-Pro', protocol: 'chat-completions',
     baseUrl: 'https://opencode.ai/zen/go/v1/chat/completions', model: 'mimo-v2.5-pro'
@@ -4406,14 +4998,52 @@ const AI_PROVIDER_PRESETS = {
     label: 'OpenCode Go · DeepSeek V4 Pro', protocol: 'chat-completions',
     baseUrl: 'https://opencode.ai/zen/go/v1/chat/completions', model: 'deepseek-v4-pro'
   },
+  'deepseek-official-v4-flash': {
+    label: 'DeepSeek 官方 · V4 Flash', protocol: 'responses',
+    baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-flash',
+    // The official Responses API is stateless. "none" keeps the Flash preset
+    // responsive for Awen's structured prompt generation.
+    reasoningEffort: 'none', disableResponseStorage: true
+  },
   'opencode-go-responses': {
     label: 'OpenCode Go · GPT-5.6 Luna', protocol: 'responses',
     baseUrl: 'https://opencode.ai/zen/go/v1/responses', model: 'gpt-5.6-luna'
+  },
+  'synapai-grok-4-5': {
+    label: 'SynapAI Grok · Grok 4.5', protocol: 'responses',
+    baseUrl: 'https://api.synapai.top/v1', model: 'grok-4.5'
+  },
+  'synapai-grok-4-3': {
+    label: 'SynapAI Grok · Grok 4.3', protocol: 'responses',
+    baseUrl: 'https://api.synapai.top/v1', model: 'grok-4.3'
+  },
+  'synapai-grok-build-0-1': {
+    label: 'SynapAI Grok · Grok Build 0.1', protocol: 'responses',
+    baseUrl: 'https://api.synapai.top/v1', model: 'grok-build-0.1'
+  },
+  'synapai-grok-4-20-multi-agent-0309': {
+    label: 'SynapAI Grok · Grok 4.20 Multi-Agent', protocol: 'responses',
+    baseUrl: 'https://api.synapai.top/v1', model: 'grok-4.20-multi-agent-0309'
+  },
+  'synapai-openai-gpt-5-5': {
+    label: 'SynapAI · OpenAI · GPT-5.5', protocol: 'responses',
+    baseUrl: 'https://api.synapai.top', model: 'gpt-5.5',
+    reasoningEffort: 'xhigh', disableResponseStorage: true
   },
   'custom': {
     label: '自定义 / 中转站', protocol: 'chat-completions', baseUrl: '', model: ''
   },
 };
+
+// These are alternative text models from the same SynapAI Grok account group.
+// Some account groups do not expose every model, so Awen can safely try the
+// remaining documented choices after an entitlement-specific 404.
+const SYNAPAI_GROK_PRESET_IDS = [
+  'synapai-grok-4-5',
+  'synapai-grok-4-3',
+  'synapai-grok-build-0-1',
+  'synapai-grok-4-20-multi-agent-0309',
+];
 
 function loadAIProviderConfig() {
   try {
@@ -4422,7 +5052,7 @@ function loadAIProviderConfig() {
       const preset = AI_PROVIDER_PRESETS[saved.preset] || AI_PROVIDER_PRESETS.custom;
       // Named OpenCode Go presets are intentionally canonical. Older builds
       // allowed URL/protocol/model drift while keeping the official label.
-      if (String(saved.preset || '').startsWith('opencode-go-')) {
+      if (/^(opencode-go-|synapai-grok-|synapai-openai-|deepseek-official-|zai-glm-5-3-(flash|high)$)/.test(String(saved.preset || ''))) {
         return { preset: saved.preset, ...preset, apiKey: String(saved.apiKey || '') };
       }
       return { ...preset, ...saved };
@@ -4441,6 +5071,8 @@ function saveAIProviderConfig(config) {
     protocol: config.protocol === 'responses' ? 'responses' : 'chat-completions',
     baseUrl: String(config.baseUrl || '').trim().replace(/\/+$/, ''),
     model: String(config.model || '').trim(),
+    reasoningEffort: String(config.reasoningEffort || '').trim(),
+    disableResponseStorage: !!config.disableResponseStorage,
     apiKey: String(config.apiKey || '').trim(),
   };
   try { localStorage.setItem(AI_PROVIDER_STORE_KEY, JSON.stringify(clean)); } catch (e) {}
@@ -4457,7 +5089,13 @@ function providerEndpoint(config) {
 }
 
 function providerCredentialScope(providerId) {
-  return String(providerId || '').startsWith('opencode-go-') ? 'opencode-go' : String(providerId || 'custom');
+  const id = String(providerId || 'custom');
+  if (id.startsWith('opencode-go-')) return 'opencode-go';
+  if (id.startsWith('synapai-grok-')) return 'synapai-grok';
+  // Both Zhipu Coding Plan presets share one key; switching flash ↔ high
+  // must keep the stored credential instead of forcing re-entry.
+  if (id.startsWith('zai-glm-5-3-')) return 'zai-glm';
+  return id;
 }
 
 function providerErrorSummary(response, body) {
@@ -4478,7 +5116,22 @@ function providerErrorSummary(response, body) {
 }
 
 function providerPayload(config, prompt) {
-  if (config.protocol === 'responses') return { model: config.model, input: prompt };
+  if (config.protocol === 'responses') {
+    const payload = { model: config.model, input: prompt };
+    // SynapAI's Grok group uses the OpenAI Responses wire format. Keep Awen
+    // generations ephemeral, matching the provider's Codex configuration.
+    if (config.disableResponseStorage || String(config.preset || '').startsWith('synapai-grok-')) payload.store = false;
+    if (config.reasoningEffort) payload.reasoning = { effort: config.reasoningEffort };
+    // The first album batch carries metadata plus six tracks. DeepSeek's
+    // Responses API defaults to plain text, so explicitly request JSON mode
+    // and leave enough room for a complete structured answer.
+    if (config.preset === 'deepseek-official-v4-flash') {
+      payload.text = { format: { type: 'json_object' } };
+      payload.max_output_tokens = 8192;
+      payload.temperature = 0.2;
+    }
+    return payload;
+  }
   const payload = { model: config.model, messages: [{ role: 'user', content: prompt }] };
   // DeepSeek V4 Pro may otherwise return JSON-looking text with an
   // unterminated final string. Ask the OpenAI-compatible endpoint for strict
@@ -4488,6 +5141,18 @@ function providerPayload(config, prompt) {
     payload.max_tokens = 8192;
     payload.thinking = { type: 'disabled' };
     payload.temperature = 0.35;
+  }
+  // GLM-5.3 family on the Zhipu Coding Plan route. thinking must stay enabled
+  // (glm-5.3 deprecated thinking.type:'disabled' — migrate to effort levels).
+  // Flash supports only enabled thinking; both presets pin 'high' reasoning to
+  // keep prompt generation capable while avoiding the costlier 'max' tier.
+  // The chat-completions API also supports JSON mode; album generation always
+  // needs a machine-readable object rather than an explanatory prose reply.
+  if (config.preset === 'zai-glm-5-3-flash' || config.preset === 'zai-glm-5-3-high') {
+    payload.response_format = { type: 'json_object' };
+    payload.thinking = { type: 'enabled' };
+    payload.reasoning_effort = 'high';
+    payload.max_tokens = 8192;
   }
   return payload;
 }
@@ -4634,6 +5299,8 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
       preset: providerId,
       label: providerLabel || (AI_PROVIDER_PRESETS[providerId]?.label) || 'Custom Provider',
       protocol, baseUrl, model,
+      reasoningEffort: AI_PROVIDER_PRESETS[providerId]?.reasoningEffort || '',
+      disableResponseStorage: !!AI_PROVIDER_PRESETS[providerId]?.disableResponseStorage,
       apiKey: apiKeyVal.trim() || keepExistingKey,
     });
     setApiKeyVal('');
@@ -4808,6 +5475,7 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
                 onKeyDown={e => e.key === 'Enter' && saveReviewSync()} />
               {reviewError && <div className="settings-error">{reviewError}</div>}
               <button className="settings-save-btn" onClick={saveReviewSync} disabled={!normalizeGitHubRepo(reviewRepoVal)}>保存 Prompt 审核仓库</button>
+              {!normalizeGitHubRepo(reviewRepoVal) && <span className="settings-hint">先在上方「目标仓库」填写 owner/仓库名，保存按钮才会启用。</span>}
               <p className="settings-note">
                 当前目标：<b>{currentReviewRepo || '尚未配置'}</b>。建议为该仓库创建独立 Fine-grained PAT，
                 仅授予 <b>Contents: Read and write</b>。不会保存 ChatGPT 对话、API Key 或其他凭据。
@@ -4882,7 +5550,7 @@ function App() {
   function pushToast(msg, opts = {}) {
     const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, msg, kind: opts.kind || 'info', actionLabel: opts.actionLabel, action: opts.action }]);
-    if (!opts.actionLabel) {
+    if (!opts.actionLabel || opts.duration) {
       setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), opts.duration || 5000);
     }
   }
@@ -5068,6 +5736,126 @@ function App() {
       { message: `update library (${items.length} items)`, content, ...(sha ? { sha } : {}) });
     setLibSha(res.content.sha);
   }
+  function libraryCoverAsset(asset) {
+    if (!asset?.path) return null;
+    const { previewDataUrl, ...stored } = asset;
+    return stored;
+  }
+  function readImageAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('无法读取封面文件'));
+      reader.readAsDataURL(file);
+    });
+  }
+  function createCoverPreview(file) {
+    return new Promise((resolve, reject) => {
+      const objectUrl = URL.createObjectURL(file);
+      const image = new Image();
+      image.onload = () => {
+        try {
+          const size = Math.min(512, image.naturalWidth, image.naturalHeight);
+          const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
+          const sourceX = Math.floor((image.naturalWidth - sourceSize) / 2);
+          const sourceY = Math.floor((image.naturalHeight - sourceSize) / 2);
+          const canvas = document.createElement('canvas');
+          canvas.width = size; canvas.height = size;
+          canvas.getContext('2d').drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, size, size);
+          resolve(canvas.toDataURL('image/jpeg', 0.84));
+        } catch (error) {
+          reject(error);
+        } finally {
+          URL.revokeObjectURL(objectUrl);
+        }
+      };
+      image.onerror = () => { URL.revokeObjectURL(objectUrl); reject(new Error('封面图片无法解码')); };
+      image.src = objectUrl;
+    });
+  }
+  async function uploadAlbumCover(albumId, file) {
+    const album = albums.find(item => item.id === albumId);
+    if (!album?.data) {
+      pushToast('专辑尚未生成完成，不能上传封面。', { kind: 'warn' });
+      return false;
+    }
+    const extensionByType = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+    const extension = extensionByType[file?.type];
+    if (!extension) {
+      pushToast('封面只支持 JPG、PNG 或 WebP。', { kind: 'warn' });
+      return false;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      pushToast('封面不能超过 8 MB。', { kind: 'warn' });
+      return false;
+    }
+    if (!safeLS.get('github_pat')) {
+      pushToast('请先在设置中配置 GitHub PAT，封面需要直接推送到曲库仓库。', { kind: 'warn', duration: 9000 });
+      return false;
+    }
+    const repo = getGitHubRepo();
+    const path = `docs/covers/${albumId}/cover.${extension}`;
+    const apiPath = path.split('/').map(encodeURIComponent).join('/');
+    try {
+      const [dataUrl, previewDataUrl] = await Promise.all([readImageAsDataUrl(file), createCoverPreview(file)]);
+      const content = dataUrl.slice(dataUrl.indexOf(',') + 1);
+      let currentSha = null;
+      try {
+        const current = await ghFetch('GET', `https://api.github.com/repos/${repo}/contents/${apiPath}`);
+        currentSha = current.sha || null;
+      } catch (error) {
+        if (error.status !== 404) throw error;
+      }
+      const uploadedAt = new Date().toISOString();
+      const response = await ghFetch('PUT', `https://api.github.com/repos/${repo}/contents/${apiPath}`, {
+        message: `cover: upload ${albumId}`,
+        content,
+        ...(currentSha ? { sha: currentSha } : {}),
+      });
+      const coverAsset = {
+        repository: repo,
+        path,
+        sha: response.content?.sha || null,
+        name: file.name,
+        mimeType: file.type,
+        size: file.size,
+        uploadedAt,
+        htmlUrl: response.content?.html_url || '',
+        downloadUrl: response.content?.download_url || '',
+        previewDataUrl,
+      };
+      setAlbums(prev => prev.map(item => item.id === albumId ? { ...item, coverAsset } : item));
+
+      // If this album is already in the favourites library, keep its GitHub
+      // metadata pointed at the newly uploaded image without changing whether
+      // the user has starred the album.
+      if (album.starred) {
+        const storedAsset = libraryCoverAsset(coverAsset);
+        const localItems = readLocalLibrary();
+        const localUpdated = localItems.map(item => item.id === albumId ? { ...item, coverAsset: storedAsset } : item);
+        writeLocalLibrary(localUpdated);
+        setLibItems(prev => mergeLibraryItems(prev, localUpdated));
+        let remoteItems = [], currentLibrarySha = null;
+        try {
+          const remote = await ghFetch('GET', `https://api.github.com/repos/${repo}/contents/${GH_LIB_PATH}`);
+          const parsed = JSON.parse(atob(remote.content.replace(/\n/g, '')));
+          remoteItems = parsed.songs || [];
+          currentLibrarySha = remote.sha;
+        } catch (error) {
+          if (error.status !== 404) throw error;
+        }
+        const updated = mergeLibraryItems(remoteItems, localUpdated);
+        await _writeLibrary(updated, currentLibrarySha);
+        setLibItems(updated);
+        writeLocalLibrary(updated);
+      }
+      pushToast(`封面已上传并推送到 GitHub：${path}`);
+      return true;
+    } catch (error) {
+      pushToast(`封面上传失败：${githubSyncMessage(error)}`, { kind: 'error', duration: 10000 });
+      return false;
+    }
+  }
   async function addToLibrary(item) {
     const pat = safeLS.get('github_pat');
     const isSong = !!item.sel;
@@ -5078,9 +5866,12 @@ function App() {
       tagline: ai.tagline || item.axisLabel || '',
       sel: item.sel || null,
       genTime: item.genTime || null,
+      aiProvider: item.aiProvider || null,
+      aiProviderUsed: item.aiProviderUsed !== false,
       createdAt: item.createdAt || null,
       savedAt: new Date().toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
       publishedAt: null,
+      coverAsset: libraryCoverAsset(item.coverAsset),
       ...(isSong ? {
         sunoRecipe: normalizeSunoRecipe(item.ai?.suno?.recipe, {
           lyrics: item.ai?.suno?.lyrics || item.ai?.suno?.structure,
@@ -5172,8 +5963,11 @@ function App() {
   }
   function promptReviewSyncMessage(error) {
     const repo = getPromptReviewRepo() || '审核仓库';
-    if (error?.status === 403 || error?.status === 404) {
-      return `GitHub 无权访问 ${repo}。请在设置中确认审核仓库，并让 PAT 授予 Contents: Read and write。`;
+    if (error?.status === 404) {
+      return `GitHub 找不到 ${repo}（404）。两种可能：仓库尚未创建；或仓库是私有的，而 PAT 的 Repository access 没有勾选它（在创建仓库之后生成的仓库，需要编辑 PAT 补勾选）。`;
+    }
+    if (error?.status === 403) {
+      return `GitHub 拒绝访问 ${repo}（403）。请让 PAT 对该仓库授予 Contents: Read and write。`;
     }
     return error?.message || 'Prompt 审核同步失败';
   }
@@ -5204,6 +5998,9 @@ function App() {
       ...(sha ? { sha } : {}),
     });
   }
+  function isGitHubWriteConflict(error) {
+    return error?.status === 409;
+  }
   async function readReviewManifest() {
     const remote = await readReviewFile(REVIEW_MANIFEST_PATH);
     if (!remote) return { sha: null, manifest: { version: 1, updatedAt: null, prompts: [] } };
@@ -5222,82 +6019,297 @@ function App() {
     }
   }
   async function upsertReviewManifest(review) {
-    const remote = await readReviewManifest();
-    const entry = {
-      key: review.key,
-      id: review.id,
-      title: review.title,
-      status: review.status,
-      sourceHash: review.sourceHash,
-      sourceFile: review.sourcePath,
-      latestReviewFile: review.latestReviewPath || null,
-      approvedFile: review.approvedPath || null,
-      applicationFile: review.applicationPath || null,
-      appliedAt: review.appliedAt || null,
-      reviewCount: review.reviewCount || 0,
-      updatedAt: new Date().toISOString(),
-    };
-    const index = remote.manifest.prompts.findIndex(item => item?.key === review.key);
-    const prompts = index < 0
-      ? [entry, ...remote.manifest.prompts]
-      : remote.manifest.prompts.map((item, i) => i === index ? { ...item, ...entry } : item);
-    const manifest = { version: 1, updatedAt: entry.updatedAt, prompts };
-    await writeReviewFile(REVIEW_MANIFEST_PATH, JSON.stringify(manifest, null, 2) + '\n',
-      `review: update manifest for ${review.id}`, remote.sha);
+    // The manifest is shared by every song and album track. Two quick submits
+    // can both read the same SHA; on GitHub's 409 we must re-read and merge
+    // rather than retrying stale JSON (which could discard the other track).
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const remote = await readReviewManifest();
+      const entry = {
+        key: review.key,
+        id: review.id,
+        title: review.title,
+        status: review.status,
+        sourceHash: review.sourceHash,
+        sourceFile: review.sourcePath,
+        latestReviewFile: review.latestReviewPath || null,
+        approvedFile: review.approvedPath || null,
+        applicationFile: review.applicationPath || null,
+        appliedAt: review.appliedAt || null,
+        reviewCount: review.reviewCount || 0,
+        updatedAt: new Date().toISOString(),
+      };
+      const index = remote.manifest.prompts.findIndex(item => item?.key === review.key);
+      const prompts = index < 0
+        ? [entry, ...remote.manifest.prompts]
+        : remote.manifest.prompts.map((item, i) => i === index ? { ...item, ...entry } : item);
+      const manifest = { version: 1, updatedAt: entry.updatedAt, prompts };
+      try {
+        await writeReviewFile(REVIEW_MANIFEST_PATH, JSON.stringify(manifest, null, 2) + '\n',
+          `review: update manifest for ${review.id}`, remote.sha);
+        return;
+      } catch (error) {
+        if (!isGitHubWriteConflict(error) || attempt === 2) throw error;
+        await new Promise(resolve => setTimeout(resolve, 180 * (attempt + 1)));
+      }
+    }
   }
   function reviewRepoReady() {
     if (!getPromptReviewRepo()) {
-      pushToast('请先在 ⚙ 设置中填写 Prompt 审核仓库。', { kind: 'warn', duration: 8000 });
+      pushToast('请先在 ⚙ 设置中填写 Prompt 审核仓库。', { kind: 'warn', duration: 8000, actionLabel: '打开设置', action: () => setSettingsOpen(true) });
       return false;
     }
     if (!getPromptReviewToken()) {
-      pushToast('请先配置 GitHub PAT，才能推送 Prompt 审核记录。', { kind: 'warn', duration: 8000 });
+      pushToast('请先配置 GitHub PAT，才能推送 Prompt 审核记录。', { kind: 'warn', duration: 8000, actionLabel: '打开设置', action: () => setSettingsOpen(true) });
       return false;
     }
     return true;
   }
-  async function submitPromptReview(songId) {
-    const song = songs.find(item => item.id === songId);
-    if (!song?.ai) { pushToast('该曲目尚未生成完成，不能提交审核。', { kind: 'warn' }); return false; }
+
+  function findPromptReviewSubject(subjectId) {
+    const song = songs.find(item => item.id === subjectId);
+    if (song) return song;
+    for (const album of albums) {
+      const tracks = album?.data?.tracks || [];
+      const index = tracks.findIndex((track, i) => albumTrackPromptId(album.id, i) === subjectId);
+      if (index >= 0) return albumTrackReviewSubject(album, tracks[index], index);
+    }
+    return null;
+  }
+
+  function updatePromptReviewSubject(subjectId, review, approvedRecipe = null) {
+    setSongs(prev => prev.map(item => item.id === subjectId ? {
+      ...item,
+      ...(approvedRecipe ? {
+        ai: { ...item.ai, title: approvedRecipe.title, suno: { ...item.ai.suno, style: approvedRecipe.style, exclude: approvedRecipe.exclude, recipe: approvedRecipe } },
+      } : {}),
+      promptReview: review,
+    } : item));
+    setAlbums(prev => prev.map(album => {
+      const tracks = album?.data?.tracks || [];
+      const index = tracks.findIndex((track, i) => albumTrackPromptId(album.id, i) === subjectId);
+      if (index < 0) return album;
+      const nextTracks = tracks.map((track, i) => i !== index ? track : {
+        ...track,
+        ...(approvedRecipe ? {
+          title: approvedRecipe.title,
+          style: approvedRecipe.style,
+          exclude: approvedRecipe.exclude,
+          sunoRecipe: approvedRecipe,
+        } : {}),
+        promptReview: review,
+      });
+      return { ...album, data: { ...album.data, tracks: nextTracks } };
+    }));
+  }
+
+  function editReviewedPrompt(subjectId, patch) {
+    const subject = findPromptReviewSubject(subjectId);
+    const review = subject?.promptReview;
+    if (!subject?.ai) { pushToast('该曲目尚未生成完成，不能编辑。', { kind: 'warn' }); return false; }
+    const base = review?.adoptedRevision || review?.lastReview?.revised;
+    if (!base) { pushToast('尚无审核后 Prompt；先完成一轮审核或采纳 GPT 修改。', { kind: 'warn' }); return false; }
+    const lyricsRoute = base.lyricsRoute || 'structure-prompt';
+    const titleVal = String(patch.title ?? base.title ?? subject.ai.title ?? '').trim();
+    const structureVal = patch.structure !== undefined ? String(patch.structure).trim() : String(base.structurePrompt || '');
+    const styleVal = patch.style !== undefined ? String(patch.style).trim() : String(base.style || '');
+    if (!styleVal) { pushToast('Style 不能为空。', { kind: 'warn' }); return false; }
+    if (lyricsRoute === 'structure-prompt' && !structureVal) {
+      pushToast('结构骨架不能为空（纯音乐 Instrumental 路线可留空）。', { kind: 'warn' });
+      return false;
+    }
+    const nextRevised = {
+      lyricsRoute,
+      structurePrompt: lyricsRoute === 'structure-prompt' ? structureVal : '',
+      style: styleVal,
+      exclude: String(base.exclude || ''),
+      title: titleVal,
+      manualEditedAt: new Date().toISOString(),
+    };
+    const nextReview = { ...review, adoptedRevision: nextRevised, manualEditedAt: nextRevised.manualEditedAt };
+    // Keep the working Suno recipe in sync so 配方折叠区、复制按钮与审核后面板一致。
+    const currentRecipe = normalizeSunoRecipe(subject.ai.suno?.recipe, {
+      lyrics: subject.ai.suno?.lyrics || subject.ai.suno?.structure,
+      style: subject.ai.suno?.style,
+      exclude: subject.ai.suno?.exclude,
+      title: subject.ai.title,
+    });
+    const approvedRecipe = {
+      ...currentRecipe,
+      lyricsRoute: nextRevised.lyricsRoute,
+      structurePrompt: nextRevised.structurePrompt,
+      style: nextRevised.style,
+      exclude: nextRevised.exclude,
+      title: nextRevised.title,
+    };
+    updatePromptReviewSubject(subjectId, nextReview, approvedRecipe);
+    pushToast('已保存手动修改（仅本机生效；GitHub 审核历史保持不变）。');
+    return true;
+  }
+  async function submitPromptReview(subjectId, options = {}) {
+    const silent = !!options.silent;
+    const subject = findPromptReviewSubject(subjectId);
+    if (!subject?.ai) {
+      if (!silent) pushToast('该曲目尚未生成完成，不能提交审核。', { kind: 'warn' });
+      return false;
+    }
     if (!reviewRepoReady()) return false;
-    const nextDraft = buildPromptReviewDraft(song);
-    const previous = song.promptReview;
+    const nextDraft = buildPromptReviewDraft(subject);
+    const previous = subject.promptReview;
     const review = previous?.sourceHash === nextDraft.sourceHash
-      ? { ...previous, status: 'in_review', submittedAt: previous.submittedAt || nextDraft.submittedAt, applicationPath: null, appliedAt: null }
-      : nextDraft;
+      ? { ...previous, status: 'in_review', submittedAt: previous.submittedAt || nextDraft.submittedAt, applicationPath: null, appliedAt: null, batchAlbumId: options.batchAlbumId || null }
+      : { ...nextDraft, batchAlbumId: options.batchAlbumId || null };
     try {
       const remote = await readReviewFile(review.sourcePath);
       await writeReviewFile(review.sourcePath, renderReviewDraftMarkdown(review),
         `review: submit ${review.id} for ChatGPT audit`, remote?.sha);
       await upsertReviewManifest(review);
-      setSongs(prev => prev.map(item => item.id === songId ? { ...item, promptReview: review } : item));
-      pushToast(`已将「${review.title}」提交到 Prompt 审核仓库。`);
+      updatePromptReviewSubject(subjectId, review);
+      if (!silent) pushToast(`已将「${review.title}」提交到 Prompt 审核仓库。`);
       return true;
     } catch (e) {
-      pushToast(`提交审核失败：${promptReviewSyncMessage(e)}`, { kind: 'error', duration: 10000 });
+      if (!silent) pushToast(`提交审核失败：${promptReviewSyncMessage(e)}`, { kind: 'error', duration: 10000 });
+      if (silent && typeof options.onBatchError === 'function') options.onBatchError(e);
       return false;
     }
   }
-  async function copyPromptReviewInstruction(songId) {
-    const song = songs.find(item => item.id === songId);
-    const review = song?.promptReview;
+  async function copyPromptReviewInstruction(subjectId) {
+    const subject = findPromptReviewSubject(subjectId);
+    const review = subject?.promptReview;
     const repo = getPromptReviewRepo();
     if (!review || !repo) { pushToast('请先提交初稿并配置审核仓库。', { kind: 'warn' }); return; }
-    const instruction = `你是 Study With Me Suno Prompt 编辑。请审核 GitHub 仓库 ${repo} 中的文件 ${review.sourcePath}，严格遵守 REVIEW_POLICY.md，并参考 schemas/review-v1.json。只返回有效 JSON，不要 Markdown 围栏。必须保留 id 为 ${review.id}、sourceHash 为 ${review.sourceHash}；不要编造 reviewedAt。`;
+    const instruction = `你是 Study With Me Suno Prompt 编辑。请审核 GitHub 仓库 ${repo} 中的文件 ${review.sourcePath}，严格遵守 REVIEW_POLICY.md，并参考 schemas/review-v1.json。只返回有效 JSON，不要 Markdown 围栏。必须保留 id 为 ${review.id}、sourceHash 为 ${review.sourceHash}；revised 必须给出 lyricsRoute、structurePrompt、style、exclude 和 title；不要编造 reviewedAt。`;
     const copied = await copyText(instruction);
     pushToast(copied ? 'ChatGPT 审核指令已复制。' : '无法自动复制，请手动复制审核指令。');
   }
-  async function applyPromptReview(songId, rawJson) {
-    const song = songs.find(item => item.id === songId);
-    const review = song?.promptReview;
-    if (!song?.ai || !review) { pushToast('请先提交该曲目的初稿。', { kind: 'warn' }); return false; }
+  function findAlbumForReview(albumId) {
+    return albums.find(album => album.id === albumId) || null;
+  }
+  async function submitAlbumPromptReviews(albumId) {
+    const album = findAlbumForReview(albumId);
+    const tracks = album?.data?.tracks || [];
+    if (!album || !tracks.length) {
+      pushToast('该专辑尚未生成完成，不能提交审核。', { kind: 'warn' });
+      return false;
+    }
+    if (!reviewRepoReady()) return false;
+    // A second click only repairs tracks that failed in an interrupted first
+    // batch. It never resets tracks that have already reached a review state.
+    const pendingIds = tracks.map((track, index) => ({ track, id: albumTrackPromptId(album.id, index) }))
+      .filter(({ track }) => !track.promptReview)
+      .map(({ id }) => id);
+    if (!pendingIds.length) {
+      pushToast('这张专辑的所有曲目都已经提交。请复制整张专辑审核指令。', { kind: 'info' });
+      return true;
+    }
+    const failed = [];
+    let batchFirstError = null;
+    for (const id of pendingIds) {
+      const submitted = await submitPromptReview(id, {
+        silent: true,
+        batchAlbumId: album.id,
+        onBatchError: e => { if (!batchFirstError) batchFirstError = e; },
+      });
+      if (!submitted) failed.push(id);
+    }
+    if (failed.length) {
+      const reason = batchFirstError ? promptReviewSyncMessage(batchFirstError) : '原因未知';
+      pushToast(`整张专辑已提交 ${pendingIds.length - failed.length}/${pendingIds.length} 首；${failed.length} 首未成功（${reason}）。可再次点击补齐。`, { kind: 'error', duration: 12000 });
+      return false;
+    }
+    pushToast(`已一次提交「${album.data.album}」的 ${pendingIds.length} 首曲目。现在复制一条审核指令即可交给 ChatGPT。`);
+    return true;
+  }
+  async function copyAlbumPromptReviewInstruction(albumId) {
+    const album = findAlbumForReview(albumId);
+    const tracks = album?.data?.tracks || [];
+    const reviews = tracks.map((track, index) => ({
+      id: albumTrackPromptId(album?.id, index),
+      review: track.promptReview,
+      subject: albumTrackReviewSubject(album, track, index),
+    }));
+    if (!album || reviews.some(item => !item.review)) {
+      pushToast('请先完整提交整张专辑。', { kind: 'warn' });
+      return;
+    }
+    // ChatGPT on the web often has no access to the user's private GitHub
+    // repository. The audit packet is therefore deliberately self-contained:
+    // it carries the real current recipes, policy and output contract instead
+    // of asking the reviewer to fetch a repository or infer missing fields.
+    const sourceList = reviews.map((item, index) => {
+      const source = buildPromptReviewDraft(item.subject).source;
+      const recipe = source.sunoRecipe;
+      return `## ${String(index + 1).padStart(2, '0')} · ${source.title}\n- id: ${item.id}\n- sourceHash: ${item.review.sourceHash}\n- track role: ${source.tagline || '—'}\n- scene/context: ${item.subject.reviewContext?.albumTitle || album.data.album}\n- Lyrics route: ${recipe.lyricsRoute}\n- Structure Prompt: ${recipe.lyricsRoute === 'structure-prompt' ? recipe.structurePrompt : '(Instrumental: must remain empty)'}\n- Structure Skeleton: ${recipe.lyricsSkeleton || '—'}\n- Style: ${recipe.style}\n- Exclude Styles: ${recipe.exclude}\n- Weirdness: ${recipe.weirdness}%\n- Style Influence: ${recipe.styleInfluence}%\n- Duration: ${sunoDurationLabel(recipe.durationSec)}\n- Song Title: ${recipe.title}\n- Workspace: ${recipe.workspace}`;
+    }).join('\n\n');
+    const rejectedIds = reviews.filter(item => ['reject', 'rejected'].includes(item.review?.status)).map(item => item.id);
+    const rejectedTrackRule = rejectedIds.length
+      ? `\n# 未通过曲目的补足任务\n以下曲目曾被拒绝：${rejectedIds.join('、')}。对它们不要只重复 reject，也不要留空。请结合本专辑的共享声音身份、相邻曲目角色和上面的实际配方，重新设计一份完整、可直接交给 Suno 的替代配方。\n\n每首被拒绝曲目都必须返回 decision: "needs_revision"，并在 revised 中完整填写 lyricsRoute、structurePrompt、style、exclude、title。该 needs_revision 表示“完整的替代曲目”；Awen 在导入整张专辑结果后会直接写入该配方并自动提交下一轮审核。\n`
+      : '';
+    const instruction = `你是 Study With Me Suno Prompt 编辑。请审核下面完整、可独立使用的专辑审核包。不要访问 GitHub、不要要求仓库权限、不要假设任何外部文件；本消息已包含审核所需的全部真实曲目数据。\n\n# 审核目标\n专辑「${album.data.album}」共有 ${reviews.length} 首。逐首检查是否适合长时间学习，同时检查整张专辑的声音身份、动态和标题是否连贯。\n\n# 审核规则\n- Focus：低干扰、可持续专注。\n- Dynamic Stability：没有突发动态、Drop 或戏剧性高潮。\n- Vocal Safety：避免歌词、演唱、spoken word 和拟人化人声。\n- Warmth：felt piano、磁带饱和、室内混响等温暖质感是否自然。\n- Loopability：适合与其他 3–6 分钟片段柔和拼接。\n- 不得删除基础 Exclude：vocals, singing, spoken word, harsh percussion, sudden dynamics, crisp, polished。\n- 避免 dramatic climax、drop、clean、hi-fi、密集 hi-hat 与复杂鼓组。\n- 若 revised.lyricsRoute 为 instrumental，revised.structurePrompt 必须是空字符串。${rejectedTrackRule}\n# 待审核的实际 Suno 配方\n${sourceList}\n\n# 返回格式（严格执行）\n只返回有效 JSON，不要 Markdown 围栏、不要解释、不要 error 字段。顶层必须是：\n{"reviews":[...]}\n\nreviews 必须恰好包含 ${reviews.length} 个对象，顺序与上方曲目一致。每个对象必须具有且仅具有这些字段：\n{"id":"保持原值","sourceHash":"保持原值","decision":"approve | approve_with_changes | needs_revision | reject","scores":{"focus":0,"dynamicStability":0,"vocalSafety":0,"warmth":0,"loopability":0},"revised":{"lyricsRoute":"structure-prompt | instrumental","structurePrompt":"字符串；Instrumental 时为空","style":"非空字符串","exclude":"非空字符串且包含全部基础 Exclude","title":"1–160 字符的建议标题"},"changes":["最多 20 条"],"risks":["最多 20 条"],"summary":"可选，不超过 2000 字符"}\n\n不要修改任一 id 或 sourceHash；不要添加 reviewedAt、schemaVersion 或其他字段。`;
+    const copied = await copyText(instruction);
+    pushToast(copied ? '已复制自包含审核包；直接粘贴到网页版 ChatGPT 即可，无需 GitHub 权限。' : '无法自动复制，请手动复制审核包。');
+  }
+  async function applyAlbumPromptReviews(albumId, rawJson) {
+    const album = findAlbumForReview(albumId);
+    const tracks = album?.data?.tracks || [];
+    if (!album || !tracks.length) {
+      pushToast('找不到可应用审核结果的专辑。', { kind: 'warn' });
+      return false;
+    }
+    if (!reviewRepoReady()) return false;
+    let results;
+    try {
+      const stripped = String(rawJson || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+      const parsed = JSON.parse(stripped);
+      results = Array.isArray(parsed) ? parsed : parsed?.reviews;
+      if (!Array.isArray(results)) throw new Error('需要 JSON 数组，或包含 reviews 数组的 JSON 对象。');
+      if (results.length !== tracks.length) throw new Error(`需要恰好 ${tracks.length} 个曲目审核结果。`);
+      const expected = new Map(tracks.map((track, index) => {
+        const id = albumTrackPromptId(album.id, index);
+        return [id, { id, review: track.promptReview }];
+      }));
+      const seen = new Set();
+      results.forEach(raw => {
+        if (!raw?.id || seen.has(raw.id) || !expected.has(raw.id)) throw new Error('reviews 含有重复、缺失或不属于本专辑的曲目 ID。');
+        const review = expected.get(raw.id).review;
+        if (!review) throw new Error(`曲目 ${raw.id} 尚未提交，不能导入审核结果。`);
+        validatePromptReviewResult(raw, review);
+        seen.add(raw.id);
+      });
+      if (seen.size !== expected.size) throw new Error('reviews 未覆盖专辑中的全部曲目。');
+    } catch (e) {
+      pushToast(`整张专辑审核 JSON 无法应用：${e.message || e}`, { kind: 'error', duration: 10000 });
+      return false;
+    }
+    const failed = [];
+    for (const result of results) {
+      // Album review is intentionally hands-off: a full GPT revision is
+      // written into its track immediately and becomes the next review draft.
+      const applied = await applyPromptReview(result.id, JSON.stringify(result), { silent: true, autoAdoptNeedsRevision: true });
+      if (!applied) failed.push(result.id);
+    }
+    if (failed.length) {
+      pushToast(`已应用 ${results.length - failed.length}/${results.length} 首审核结果；失败曲目：${failed.join('、')}。可再次粘贴同一结果重试。`, { kind: 'warn', duration: 10000 });
+      return false;
+    }
+    pushToast(`已应用「${album.data.album}」整张专辑的 ${results.length} 首 ChatGPT 审核结果，并同步到 GitHub。`);
+    return true;
+  }
+  async function applyPromptReview(subjectId, rawJson, options = {}) {
+    const silent = !!options.silent;
+    const autoAdoptNeedsRevision = !!options.autoAdoptNeedsRevision;
+    const subject = findPromptReviewSubject(subjectId);
+    const review = subject?.promptReview;
+    if (!subject?.ai || !review) {
+      if (!silent) pushToast('请先提交该曲目的初稿。', { kind: 'warn' });
+      return false;
+    }
     if (!reviewRepoReady()) return false;
     let result;
     try {
       const stripped = String(rawJson || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
       result = validatePromptReviewResult(JSON.parse(stripped), review);
     } catch (e) {
-      pushToast(`审核 JSON 无法应用：${e.message || e}`, { kind: 'error', duration: 10000 });
+      if (!silent) pushToast(`审核 JSON 无法应用：${e.message || e}`, { kind: 'error', duration: 10000 });
       return false;
     }
     const revision = (review.reviewCount || 0) + 1;
@@ -5308,45 +6320,219 @@ function App() {
       await writeReviewFile(reviewPath, JSON.stringify({ schemaVersion: 1, revision, ...result }, null, 2) + '\n',
         `review: record ${review.id} r${String(revision).padStart(2, '0')}`);
       if (isApproved) {
-        const previousRecipe = normalizeSunoRecipe(song.ai.suno?.recipe, {
-          lyrics: song.ai.suno?.lyrics || song.ai.suno?.structure,
-          style: song.ai.suno?.style,
-          exclude: song.ai.suno?.exclude,
-          title: song.ai.title,
-          workspace: 'Awen · Singles',
+        const previousRecipe = normalizeSunoRecipe(subject.ai.suno?.recipe, {
+          lyrics: subject.ai.suno?.lyrics || subject.ai.suno?.structure,
+          style: subject.ai.suno?.style,
+          exclude: subject.ai.suno?.exclude,
+          title: subject.ai.title,
+          workspace: subject.ai.suno?.recipe?.workspace || 'Awen · Singles',
         });
         const approvedRecipe = normalizeSunoRecipe({
           ...previousRecipe,
           ...result.revised,
           lyricsSkeleton: result.revised.lyricsRoute === 'structure-prompt' ? previousRecipe.lyricsSkeleton : '',
-          title: previousRecipe.title,
+          title: result.revised.title || previousRecipe.title,
           workspace: previousRecipe.workspace,
         });
         await writeReviewFile(approvedPath, renderApprovedReviewMarkdown(review, result, revision),
           `review: approve ${review.id} r${String(revision).padStart(2, '0')}`);
-        const nextReview = { ...review, status: 'approved', latestReviewPath: reviewPath, approvedPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result };
+        const nextReview = { ...review, title: approvedRecipe.title, status: 'approved', latestReviewPath: reviewPath, approvedPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, adoptedRevision: null };
         await upsertReviewManifest(nextReview);
-        setSongs(prev => prev.map(item => item.id === songId ? {
-          ...item,
-          ai: { ...item.ai, suno: { ...item.ai.suno, style: approvedRecipe.style, exclude: approvedRecipe.exclude, recipe: approvedRecipe } },
-          promptReview: nextReview,
-        } : item));
-        pushToast(`已应用 ChatGPT 修改，并推送批准版本 r${String(revision).padStart(2, '0')}。`);
+        updatePromptReviewSubject(subjectId, nextReview, approvedRecipe);
+        if (!silent) pushToast(`已应用 ChatGPT 修改，并推送批准版本 r${String(revision).padStart(2, '0')}。`);
+      } else if (result.decision === 'needs_revision' && autoAdoptNeedsRevision) {
+        const currentRecipe = normalizeSunoRecipe(subject.ai.suno?.recipe, {
+          lyrics: subject.ai.suno?.lyrics || subject.ai.suno?.structure,
+          style: subject.ai.suno?.style,
+          exclude: subject.ai.suno?.exclude,
+          title: subject.ai.title,
+          workspace: subject.ai.suno?.recipe?.workspace || 'Awen · Singles',
+        });
+        const adoptedRecipe = normalizeSunoRecipe({
+          ...currentRecipe,
+          ...result.revised,
+          lyricsSkeleton: result.revised.lyricsRoute === 'structure-prompt' ? currentRecipe.lyricsSkeleton : '',
+          title: result.revised.title || currentRecipe.title,
+          workspace: currentRecipe.workspace,
+        });
+        const revisedSubject = {
+          ...subject,
+          ai: {
+            ...subject.ai,
+            title: adoptedRecipe.title,
+            suno: {
+              ...subject.ai.suno,
+              style: adoptedRecipe.style,
+              exclude: adoptedRecipe.exclude,
+              recipe: adoptedRecipe,
+            },
+          },
+        };
+        const nextDraft = buildPromptReviewDraft(revisedSubject);
+        if (nextDraft.sourceHash === review.sourceHash) {
+          // There is nothing new to submit, but preserve the reviewer result.
+          const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, adoptedRevision: null };
+          await upsertReviewManifest(nextReview);
+          updatePromptReviewSubject(subjectId, nextReview);
+        } else {
+          const reviewRound = Math.max(1, Number(review.reviewRound) || 1) + 1;
+          const nextReview = {
+            ...nextDraft,
+            reviewRound,
+            batchAlbumId: review.batchAlbumId || null,
+            adoptedRevision: {
+              lyricsRoute: adoptedRecipe.lyricsRoute,
+              structurePrompt: adoptedRecipe.structurePrompt,
+              style: adoptedRecipe.style,
+              exclude: adoptedRecipe.exclude,
+              title: adoptedRecipe.title,
+            },
+            supersedes: {
+              key: review.key,
+              sourceHash: review.sourceHash,
+              sourceFile: review.sourcePath,
+              reviewFile: reviewPath,
+            },
+          };
+          const adoptionPath = `reviews/${review.key}-r${String(revision).padStart(2, '0')}-auto-adopted-revision.json`;
+          const adoptionRecord = {
+            schemaVersion: 1,
+            event: 'auto_adopted_revision_from_album_review',
+            id: review.id,
+            adoptedAt: new Date().toISOString(),
+            from: { key: review.key, sourceHash: review.sourceHash, sourceFile: review.sourcePath, reviewFile: reviewPath },
+            to: { key: nextReview.key, sourceHash: nextReview.sourceHash, sourceFile: nextReview.sourcePath },
+            revised: nextReview.adoptedRevision,
+          };
+          const existingAdoption = await readReviewFile(adoptionPath);
+          await writeReviewFile(adoptionPath, JSON.stringify(adoptionRecord, null, 2) + '\n',
+            `review: auto-adopt ${review.id} r${String(revision).padStart(2, '0')}`, existingAdoption?.sha);
+          const existingDraft = await readReviewFile(nextReview.sourcePath);
+          await writeReviewFile(nextReview.sourcePath, renderReviewDraftMarkdown(nextReview),
+            `review: submit revised ${nextReview.id} for ChatGPT audit`, existingDraft?.sha);
+          await upsertReviewManifest(nextReview);
+          updatePromptReviewSubject(subjectId, nextReview, adoptedRecipe);
+        }
+        if (!silent) pushToast(`已直接写入 GPT 修改，并提交第 ${Math.max(1, Number(review.reviewRound) || 1) + 1} 轮审核。`);
       } else {
-        const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result };
+        const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, adoptedRevision: null };
         await upsertReviewManifest(nextReview);
-        setSongs(prev => prev.map(item => item.id === songId ? { ...item, promptReview: nextReview } : item));
-        pushToast('审核结论已记录；原始 Suno 配方保持不变。');
+        updatePromptReviewSubject(subjectId, nextReview);
+        if (!silent) pushToast('审核结论已记录；原始 Suno 配方保持不变。');
       }
       return true;
     } catch (e) {
-      pushToast(`保存审核结果失败：${promptReviewSyncMessage(e)}`, { kind: 'error', duration: 10000 });
+      if (!silent) pushToast(`保存审核结果失败：${promptReviewSyncMessage(e)}`, { kind: 'error', duration: 10000 });
       return false;
     }
   }
-  async function markPromptReviewApplied(songId) {
-    const song = songs.find(item => item.id === songId);
-    const review = song?.promptReview;
+  async function adoptPromptReviewRevision(subjectId) {
+    const subject = findPromptReviewSubject(subjectId);
+    const review = subject?.promptReview;
+    const revised = review?.lastReview?.revised;
+    if (!subject?.ai || review?.status !== 'needs_revision' || !revised) {
+      pushToast('只有“需要修改”的审核结果可以采纳并复审。', { kind: 'warn' });
+      return false;
+    }
+    if (!reviewRepoReady()) return false;
+
+    const currentRecipe = normalizeSunoRecipe(subject.ai.suno?.recipe, {
+      lyrics: subject.ai.suno?.lyrics || subject.ai.suno?.structure,
+      style: subject.ai.suno?.style,
+      exclude: subject.ai.suno?.exclude,
+      title: subject.ai.title,
+      workspace: subject.ai.suno?.recipe?.workspace || 'Awen · Singles',
+    });
+    const adoptedRecipe = normalizeSunoRecipe({
+      ...currentRecipe,
+      ...revised,
+      lyricsSkeleton: revised.lyricsRoute === 'structure-prompt' ? currentRecipe.lyricsSkeleton : '',
+      title: revised.title || currentRecipe.title,
+      workspace: currentRecipe.workspace,
+    });
+    const revisedSubject = {
+      ...subject,
+      ai: {
+        ...subject.ai,
+        title: adoptedRecipe.title,
+        suno: {
+          ...subject.ai.suno,
+          style: adoptedRecipe.style,
+          exclude: adoptedRecipe.exclude,
+          recipe: adoptedRecipe,
+        },
+      },
+    };
+    const nextDraft = buildPromptReviewDraft(revisedSubject);
+    if (nextDraft.sourceHash === review.sourceHash) {
+      pushToast('GPT 建议没有产生可提交的配方变化。请先手动调整或重新审核。', { kind: 'warn' });
+      return false;
+    }
+    const revision = String(review.reviewCount || 0).padStart(2, '0');
+    const adoptionPath = `reviews/${review.key}-r${revision}-adopted-revision.json`;
+    const nextReview = {
+      ...nextDraft,
+      // The source draft itself stays immutable. These local fields describe
+      // the handoff from the prior result to the new review round.
+      reviewRound: Math.max(1, Number(review.reviewRound) || 1) + 1,
+      batchAlbumId: review.batchAlbumId || null,
+      adoptedRevision: {
+        lyricsRoute: adoptedRecipe.lyricsRoute,
+        structurePrompt: adoptedRecipe.structurePrompt,
+        style: adoptedRecipe.style,
+        exclude: adoptedRecipe.exclude,
+        title: adoptedRecipe.title,
+      },
+      supersedes: {
+        key: review.key,
+        sourceHash: review.sourceHash,
+        sourceFile: review.sourcePath,
+        reviewFile: review.latestReviewPath || null,
+      },
+    };
+    const adoptionRecord = {
+      schemaVersion: 1,
+      event: 'adopted_revision_for_resubmission',
+      id: review.id,
+      adoptedAt: new Date().toISOString(),
+      from: {
+        key: review.key,
+        sourceHash: review.sourceHash,
+        sourceFile: review.sourcePath,
+        reviewFile: review.latestReviewPath || null,
+      },
+      to: {
+        key: nextReview.key,
+        sourceHash: nextReview.sourceHash,
+        sourceFile: nextReview.sourcePath,
+      },
+      revised: {
+        lyricsRoute: adoptedRecipe.lyricsRoute,
+        structurePrompt: adoptedRecipe.structurePrompt,
+        style: adoptedRecipe.style,
+        exclude: adoptedRecipe.exclude,
+        title: adoptedRecipe.title,
+      },
+    };
+    try {
+      const existingAdoption = await readReviewFile(adoptionPath);
+      await writeReviewFile(adoptionPath, JSON.stringify(adoptionRecord, null, 2) + '\n',
+        `review: adopt ${review.id} r${revision} for resubmission`, existingAdoption?.sha);
+      const existingDraft = await readReviewFile(nextReview.sourcePath);
+      await writeReviewFile(nextReview.sourcePath, renderReviewDraftMarkdown(nextReview),
+        `review: submit revised ${nextReview.id} for ChatGPT audit`, existingDraft?.sha);
+      await upsertReviewManifest(nextReview);
+      updatePromptReviewSubject(subjectId, nextReview, adoptedRecipe);
+      pushToast(`已采纳 GPT 修改，并将「${adoptedRecipe.title}」提交为新一轮审核。`);
+      return true;
+    } catch (e) {
+      pushToast(`采纳修改并提交复审失败：${promptReviewSyncMessage(e)}`, { kind: 'error', duration: 10000 });
+      return false;
+    }
+  }
+  async function markPromptReviewApplied(subjectId) {
+    const subject = findPromptReviewSubject(subjectId);
+    const review = subject?.promptReview;
     if (!review || review.status !== 'approved' || !review.approvedPath) {
       pushToast('只有已批准的审核版本可以标记为已应用 Suno。', { kind: 'warn' });
       return false;
@@ -5368,7 +6554,7 @@ function App() {
         `review: mark ${review.id} as applied to Suno`, existing?.sha);
       const nextReview = { ...review, status: 'applied_to_suno', applicationPath, appliedAt };
       await upsertReviewManifest(nextReview);
-      setSongs(prev => prev.map(item => item.id === songId ? { ...item, promptReview: nextReview } : item));
+      updatePromptReviewSubject(subjectId, nextReview);
       pushToast('已标记为“已应用 Suno”，并同步推送到 GitHub。');
       return true;
     } catch (e) {
@@ -5412,13 +6598,21 @@ function App() {
     const chat = data?.choices?.[0]?.message?.content;
     if (typeof chat === 'string') return chat;
     if (Array.isArray(chat)) {
-      const joined = chat.map(x => typeof x === 'string' ? x : (x?.text || '')).join('');
+      const joined = chat.map(x => typeof x === 'string' ? x : (x?.text || x?.output_text || x?.content || '')).join('');
       if (joined) return joined;
     }
     if (typeof data?.output_text === 'string') return data.output_text;
     if (Array.isArray(data?.output)) {
-      const joined = data.output.flatMap(item => Array.isArray(item?.content) ? item.content : [])
-        .map(part => typeof part?.text === 'string' ? part.text : '').join('');
+      // Responses APIs can return a reasoning item before the assistant
+      // message. Never concatenate that reasoning text with the final output:
+      // it can contain prose (or JSON examples) that corrupt Awen's parsing.
+      const messages = data.output.filter(item => item?.type === 'message' || item?.role === 'assistant');
+      const joined = messages.flatMap(item => {
+        if (typeof item?.content === 'string') return [item.content];
+        if (typeof item?.output_text === 'string') return [item.output_text];
+        return Array.isArray(item?.content) ? item.content : [];
+      }).filter(part => typeof part === 'string' || part?.type === 'output_text')
+        .map(part => typeof part === 'string' ? part : (part?.text || part?.output_text || part?.content || '')).join('');
       if (joined) return joined;
     }
     return '';
@@ -5473,6 +6667,45 @@ function App() {
           { duration: 8000 });
         }
       }
+      // SynapAI can authenticate a group key that does not include every Grok
+      // model. In that case, try the user's other documented group choices and
+      // remember the first available one, instead of failing every generation
+      // on the unavailable default.
+      if (r.status === 404 && String(cfg.preset || '').startsWith('synapai-grok-')) {
+        // Read a clone so a non-entitlement 404 can still surface its original
+        // provider error below.
+        const firstError = await r.clone().text().catch(() => '');
+        if (/not supported by any configured account in this group/i.test(firstError)) {
+          let workingFallback = null;
+          for (const fallbackId of SYNAPAI_GROK_PRESET_IDS) {
+            if (fallbackId === cfg.preset) continue;
+            const fallbackPreset = AI_PROVIDER_PRESETS[fallbackId];
+            const fallback = { preset: fallbackId, ...fallbackPreset, apiKey: cfg.apiKey };
+            const fallbackResponse = await callProvider(
+              providerEndpoint(fallback), cfg.apiKey, providerPayload(fallback, prompt), ctrl.signal
+            );
+            if (fallbackResponse.ok) {
+              activeCfg = fallback;
+              r = fallbackResponse;
+              workingFallback = fallback;
+              break;
+            }
+          }
+          if (workingFallback) {
+            const savedFallback = saveAIProviderConfig(workingFallback);
+            setProviderConfig(savedFallback);
+            setHasKey(true);
+            pushToast(window.I18N.isZh()
+              ? `${cfg.label} 无权限，已自动切换到 ${workingFallback.label}。`
+              : `${cfg.label} is unavailable for this account; switched to ${workingFallback.label}.`,
+            { duration: 8000 });
+          } else {
+            throw new Error(window.I18N.isZh()
+              ? 'SynapAI 账号组未开放当前四个 Grok 预设。请在 SynapAI 控制台确认该 Key 所属组可用的模型名，再使用“自定义 / 中转站”填写。'
+              : 'This SynapAI account group does not expose any configured Grok preset. Confirm the allowed model ID in SynapAI, then use Custom Provider.');
+          }
+        }
+      }
       if (r.status === 503 && cfg.preset === 'opencode-go-deepseek-v4-pro') {
         await r.text().catch(() => '');
         await new Promise(resolve => setTimeout(resolve, 1500));
@@ -5491,9 +6724,16 @@ function App() {
         throw new Error(`${activeCfg.label} ${r.status}: ${providerErrorSummary(r, err)}`);
       }
       const data = await r.json();
+      if (data?.status === 'incomplete') {
+        const reason = data?.incomplete_details?.reason || 'unknown';
+        throw new Error(`${activeCfg.label} 输出未完成（${reason}）`);
+      }
+      if (data?.status === 'failed') {
+        throw new Error(`${activeCfg.label} 返回失败：${data?.error?.message || 'unknown error'}`);
+      }
       const text = providerText(data);
       if (!text) throw new Error(`${activeCfg.label} returned empty response`);
-      return text;
+      return { text, providerLabel: activeCfg.label };
     } catch (e) {
       if (e.name === 'AbortError') throw new Error(T('aiTimeout'));
       if (e instanceof TypeError && /fetch/i.test(e.message || '')) {
@@ -5554,12 +6794,14 @@ HARD OUTPUT BUDGET: the complete minified JSON must be under 4000 characters. Ke
 Return ONLY minified JSON (no markdown) with EXACTLY this shape:
 {"title":"evocative 2-5 word Title Case song name","tagline":"3-6 word mood tagline lowercase","suno":{"key":"musical key + mode (INTERNAL, not shown)","style":"comma-separated Suno Style string, motif included, ending with the long-form words","lyrics":"[Instrumental]\n[Intro] ...\n[Verse A] ...\n[Verse B] ...\n[Bridge] ...\n[Verse C] ...\n[Bridge] ...\n[Verse D] ...\n[Outro] ...\n[End]","exclude":"vocals, singing, spoken word, harsh percussion, sudden dynamics, crisp, polished","prompt":"ONE short reference sentence","motif":"the shared melodic motif in 3-6 words"},"cover":"square 1:1 cover-art prompt: Character + Environment + Motif + Light + Palette + camera + mood; Awen signatures (open book, warm lamp, wood, cozy); centered, negative space near top for title; no text, no logos, no motion","video":"16:9 looping video: motif in slow motion, same light + palette, dust drift, slow cinematic drift, shallow DOF, seamless loop, no people","thumb":"YouTube 1280×720 consistency rules: same palette + lamp + open book every time, Awen wordmark lower-left, same title type top-left"}
 No vocals. Cover / video / thumbnail MUST share the same visual identity.`;
-    const raw = await complete(prompt);
+    const completed = await complete(prompt);
+    const raw = completed.text;
     const a = raw.indexOf('{'),b = raw.lastIndexOf('}');
     if (a < 0 || b < 0) throw new Error('no json');
     const j = JSON.parse(raw.slice(a, b + 1));
     if (!j.title || !j.suno || !j.suno.prompt || !(j.cover || j.video)) throw new Error('bad shape');
     return {
+      providerLabel: completed.providerLabel,
       title: String(j.title).slice(0, 60),
       tagline: j.tagline ? String(j.tagline) : `${s.mood.toLowerCase()} · ${s.time.toLowerCase()}`,
       suno: {
@@ -5590,9 +6832,13 @@ No vocals. Cover / video / thumbnail MUST share the same visual identity.`;
     setBusy(true);
 
     let ai = null;
+    let aiProvider = null;
+    let aiProviderUsed = false;
     const _genStart = Date.now();
     try {
       ai = await callAI(baseSel);
+      aiProvider = ai.providerLabel;
+      aiProviderUsed = true;
     } catch (e) {
       pushToast(T('aiFailed') + ' — ' + e.message, {
         kind: 'error',
@@ -5611,6 +6857,8 @@ No vocals. Cover / video / thumbnail MUST share the same visual identity.`;
         ...x,
         generating: false,
         ai: preparedAi,
+        aiProvider,
+        aiProviderUsed,
         genTime,
         createdAt: new Date().toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' })
       } : x);
@@ -5728,7 +6976,8 @@ Calm, warm, instrumental, no vocals.`;
     const batch3 = recipes.slice(b1Size + b2Size);
 
     // ── Step 1: metadata + first batch (serial) ──────────────────────────────
-    const raw1 = await complete(_metaBatchPrompt(axis, base, batch1, b1Size, total));
+    const completed1 = await complete(_metaBatchPrompt(axis, base, batch1, b1Size, total));
+    const raw1 = completed1.text;
     const s1 = raw1.indexOf('{'), e1 = raw1.lastIndexOf('}');
     if (s1 < 0 || e1 < 0) throw new Error('batch 1: no JSON');
     const j1 = JSON.parse(raw1.slice(s1, e1 + 1));
@@ -5741,10 +6990,14 @@ Calm, warm, instrumental, no vocals.`;
     };
 
     // ── Step 2: remaining batches in parallel ─────────────────────────────────
-    const [raw2, raw3] = await Promise.all([
+    const [completed2, completed3] = await Promise.all([
       batch2.length ? complete(_trackBatchPrompt(meta, batch2, b1Size, total))           : Promise.resolve('[]'),
       batch3.length ? complete(_trackBatchPrompt(meta, batch3, b1Size + b2Size, total)) : Promise.resolve('[]'),
     ]);
+    const raw2 = typeof completed2 === 'string' ? completed2 : completed2.text;
+    const raw3 = typeof completed3 === 'string' ? completed3 : completed3.text;
+    const providerLabels = [completed1.providerLabel, completed2?.providerLabel, completed3?.providerLabel]
+      .filter(Boolean).filter((label, index, all) => all.indexOf(label) === index);
 
     const parseBatch = (raw) => {
       const a = raw.indexOf('['), b = raw.lastIndexOf(']');
@@ -5754,6 +7007,7 @@ Calm, warm, instrumental, no vocals.`;
     const allRaw = [...j1.tracks, ...parseBatch(raw2), ...parseBatch(raw3)];
 
     return {
+      providerLabel: providerLabels.join(' / '),
       album:         String(j1.album).slice(0, 60),
       concept:       String(j1.concept       || ''),
       theme:         String(j1.theme         || j1.concept || ''),
@@ -5770,8 +7024,44 @@ Calm, warm, instrumental, no vocals.`;
       cover:         String(j1.cover  || ''),
       video:         String(j1.video  || ''),
       thumb:         String(j1.thumb  || A.thumbRules(base)),
-      tracks:        allRaw.map((t, i) => _parseTrack(t, i, recipes)),
+      // A provider can finish a request successfully while stopping one batch
+      // early. Keep any valid AI tracks, then fill only the missing positions
+      // from the deterministic recipe so a requested 16-track album is always
+      // complete and stays in the expected order.
+      tracks:        recipes.map((_, i) => _parseTrack(allRaw[i] || {}, i, recipes)),
     };
+  }
+
+  async function generateAlbumData({ id, axis, base, recipes, fallbackAxis }) {
+    const startedAt = Date.now();
+    let data = null;
+    let aiProvider = null;
+    let aiProviderUsed = false;
+    let genTime = null;
+    try {
+      const generated = await callAlbumAI(axis, base, recipes);
+      if (!generated || !Array.isArray(generated.tracks) || generated.tracks.length !== recipes.length) {
+        throw new Error(`album returned ${generated?.tracks?.length || 0}/${recipes.length} tracks`);
+      }
+      data = attachAlbumSunoRecipes(generated, sunoDefaults);
+      aiProvider = generated.providerLabel;
+      aiProviderUsed = true;
+      genTime = ((Date.now() - startedAt) / 1000).toFixed(1);
+    } catch (e) {
+      pushToast(T('aiFailed') + ' — ' + e.message + '  (已切换模板引擎)', { kind: 'warn' });
+      // A response/parse failure must never leave a 16-track album permanently
+      // in its loading state. The template result is complete and remains ready
+      // for the normal ChatGPT review workflow.
+      data = attachAlbumSunoRecipes(A.fallbackAlbum(fallbackAxis, base, recipes), sunoDefaults);
+    } finally {
+      const completedAt = new Date().toLocaleString('zh-CN', {
+        year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+      });
+      setAlbums((prev) => prev.map((x) => x.id === id
+        ? { ...x, generating: false, data, aiProvider, aiProviderUsed, genTime, createdAt: completedAt }
+        : x));
+      setBusy(false);
+    }
   }
 
   async function buildAlbum() {
@@ -5781,17 +7071,7 @@ Calm, warm, instrumental, no vocals.`;
     setAlbumSeq((n) => n + 1);
     setAlbums((prev) => [{ id, axisLabel: axis.label, base: { ...sel }, universeId: activeUniverseId, status: 'Draft', generating: true }, ...prev]);
     setBusy(true);
-    let data = null;
-    const _albStart = Date.now();
-    try {data = await callAlbumAI(axis, sel, recipes);} catch (e) {
-      pushToast(T('aiFailed') + ' — ' + e.message + '  (已切换模板引擎)', { kind: 'warn' });
-      data = null;
-    }
-    const albGenTime = data ? ((Date.now() - _albStart) / 1000).toFixed(1) : null;
-    if (!data) data = A.fallbackAlbum(axisKey, sel, recipes);
-    data = attachAlbumSunoRecipes(data, sunoDefaults);
-    setAlbums((prev) => prev.map((x) => x.id === id ? { ...x, generating: false, data, genTime: albGenTime, createdAt: new Date().toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) } : x));
-    setBusy(false);
+    await generateAlbumData({ id, axis, base: sel, recipes, fallbackAxis: axisKey });
   }
 
   // V3 Scene → Album: map Scene/Mood/Purpose to a full recipe, then run the
@@ -5805,17 +7085,7 @@ Calm, warm, instrumental, no vocals.`;
     setAlbumSeq((n) => n + 1);
     setAlbums((prev) => [{ id, axisLabel: scene ? scene.label : axis.label, base: { ...base }, universeId: null, status: 'Draft', generating: true }, ...prev]);
     setBusy(true);
-    let data = null;
-    const _scnStart = Date.now();
-    try { data = await callAlbumAI(axis, base, recipes); } catch (e) {
-      pushToast(T('aiFailed') + ' — ' + e.message + '  (已切换模板引擎)', { kind: 'warn' });
-      data = null;
-    }
-    const scnGenTime = data ? ((Date.now() - _scnStart) / 1000).toFixed(1) : null;
-    if (!data) data = A.fallbackAlbum('day', base, recipes);
-    data = attachAlbumSunoRecipes(data, sunoDefaults);
-    setAlbums((prev) => prev.map((x) => x.id === id ? { ...x, generating: false, data, genTime: scnGenTime, createdAt: new Date().toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) } : x));
-    setBusy(false);
+    await generateAlbumData({ id, axis, base, recipes, fallbackAxis: 'day' });
   }
 
   function remixSong(recipeSel) {
@@ -6017,7 +7287,14 @@ Calm, warm, instrumental, no vocals.`;
 
         <div className="albshelf">
               {albums.map((a) =>
-          <AlbumCard key={a.id} album={a} onStatus={setAlbumStatus} onDelete={removeAlbum} onPin={setPinAlbum} onStar={addToLibrary} />
+          <AlbumCard key={a.id} album={a} onStatus={setAlbumStatus} onDelete={removeAlbum} onPin={setPinAlbum} onStar={addToLibrary}
+            onCoverUpload={uploadAlbumCover}
+            onReviewSubmit={submitPromptReview} onReviewCopy={copyPromptReviewInstruction}
+            onReviewApply={applyPromptReview} onReviewMarkApplied={markPromptReviewApplied}
+            onReviewAdoptRevision={adoptPromptReviewRevision}
+            onEditReviewed={editReviewedPrompt}
+            onAlbumReviewSubmit={submitAlbumPromptReviews} onAlbumReviewCopy={copyAlbumPromptReviewInstruction}
+            onAlbumReviewApply={applyAlbumPromptReviews} />
           )}
             </div>
         }
@@ -6039,7 +7316,8 @@ Calm, warm, instrumental, no vocals.`;
         <div className="feed-list">
               {songs.map((s) =>
           <SongCard key={s.id} song={s} onStatus={setStatus} onDelete={removeSong} onPin={setPinSong} onRemix={remixSong} onStar={addToLibrary}
-            onReviewSubmit={submitPromptReview} onReviewCopy={copyPromptReviewInstruction} onReviewApply={applyPromptReview} onReviewMarkApplied={markPromptReviewApplied} />
+            onReviewSubmit={submitPromptReview} onReviewCopy={copyPromptReviewInstruction} onReviewApply={applyPromptReview} onReviewMarkApplied={markPromptReviewApplied}
+            onReviewAdoptRevision={adoptPromptReviewRevision} onEditReviewed={editReviewedPrompt} />
           )}
             </div>
         }
