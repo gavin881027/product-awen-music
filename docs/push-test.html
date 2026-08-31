@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>GitHub 推送完整测试</title></head>
+<body style="font-family:monospace;padding:20px;background:#1a1a1a;color:#ddd">
+<h2>GitHub 推送完整测试</h2>
+<button onclick="testFlow()" style="padding:8px 16px;font-size:14px;cursor:pointer">开始测试推送流程</button>
+<pre id="out" style="margin-top:20px;white-space:pre-wrap"></pre>
+<script>
+const out = document.getElementById('out');
+let log = '';
+const add = s => { log += s + '\n'; out.textContent = log; };
+
+async function testFlow() {
+  log = ''; add('=== 开始测试 ===');
+  const repo = localStorage.getItem('github_repo') || 'awenstudio/product-awen-music';
+  const pat = localStorage.getItem('github_pat');
+  const path = 'library.json';
+
+  add(`仓库: ${repo}`);
+  add(`PAT: ${pat ? '已存储 (后6位: ' + pat.slice(-6) + ')' : '未配置'}`);
+  add('');
+
+  if (!pat) { add('❌ 未配置 PAT'); return; }
+
+  const headers = {
+    'Authorization': `Bearer ${pat}`,
+    'Accept': 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28'
+  };
+
+  try {
+    add('步骤 1: 检查仓库权限...');
+    const r1 = await fetch(`https://api.github.com/repos/${repo}`, { headers });
+    add(`  HTTP ${r1.status}`);
+    if (r1.status !== 200) {
+      add(`  ❌ 仓库查询失败: ${await r1.text()}`);
+      return;
+    }
+    const repoData = await r1.json();
+    add(`  ✓ 仓库: ${repoData.full_name}`);
+    add(`  ✓ 权限: ${repoData.permissions?.push ? '可写' : '只读'}`);
+    if (!repoData.permissions?.push) {
+      add('  ❌ PAT 无写权限，中止测试');
+      return;
+    }
+    add('');
+
+    add('步骤 2: 尝试读取现有文件...');
+    const r2 = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, { headers });
+    add(`  HTTP ${r2.status}`);
+    let sha = null;
+    if (r2.status === 200) {
+      const fileData = await r2.json();
+      sha = fileData.sha;
+      add(`  ✓ 文件已存在，SHA: ${sha.slice(0, 8)}...`);
+    } else if (r2.status === 404) {
+      add(`  ✓ 文件不存在（首次推送）`);
+    } else {
+      add(`  ⚠️ 非预期状态: ${await r2.text()}`);
+    }
+    add('');
+
+    add('步骤 3: 写入测试数据...');
+    const testData = { version: 2, songs: [{ id: 'TEST-001', title: '测试歌曲', createdAt: new Date().toISOString() }] };
+    const json = JSON.stringify(testData, null, 2);
+    const content = btoa(unescape(encodeURIComponent(json)));
+
+    const payload = {
+      message: 'test: Awen 推送测试',
+      content,
+      ...(sha ? { sha } : {})
+    };
+
+    add(`  请求体: ${JSON.stringify(payload, null, 2).slice(0, 200)}...`);
+    add('');
+
+    const r3 = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
+      method: 'PUT',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    add(`  HTTP ${r3.status}`);
+    const r3text = await r3.text();
+
+    if (r3.status === 200 || r3.status === 201) {
+      const result = JSON.parse(r3text);
+      add(`  ✅ 推送成功！`);
+      add(`  新 SHA: ${result.content.sha.slice(0, 8)}...`);
+      add(`  查看: https://github.com/${repo}/blob/main/${path}`);
+    } else {
+      add(`  ❌ 推送失败:`);
+      add(r3text);
+    }
+  } catch (e) {
+    add(`❌ 异常: ${e.message}`);
+  }
+}
+</script>
+</body></html>
