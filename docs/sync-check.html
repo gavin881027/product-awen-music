@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Awen GitHub 同步诊断</title></head>
+<body style="font-family:monospace;padding:20px;background:#1a1a1a;color:#ddd">
+<h2>Awen GitHub 同步诊断</h2>
+<pre id="out">检查中...</pre>
+<script>
+const out = document.getElementById('out');
+let log = '';
+const add = s => { log += s + '\n'; out.textContent = log; };
+
+add('=== localStorage 状态 ===');
+const repo = localStorage.getItem('github_repo');
+const pat = localStorage.getItem('github_pat');
+add(`目标仓库: ${repo || '(未配置，将用默认值 awenstudio/product-awen-music)'}`);
+add(`PAT 状态: ${pat ? '已存储 (后6位: ' + pat.slice(-6) + ')' : '未存储'}`);
+add('');
+
+if (!pat) {
+  add('❌ 未配置 GitHub PAT —— 收藏功能无法推送到远端。');
+  add('');
+  add('修复：⚙ 设置 → GitHub 同步 → 粘贴 PAT → 保存。');
+} else {
+  add('=== 测试 GitHub API 连通性（不修改任何数据）===');
+  const testRepo = repo || 'awenstudio/product-awen-music';
+
+  fetch(`https://api.github.com/repos/${testRepo}`, {
+    headers: { 'Authorization': `Bearer ${pat}`, 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }
+  }).then(r => {
+    add(`仓库查询: HTTP ${r.status}`);
+    if (r.status === 200) return r.json().then(d => {
+      add(`✓ 仓库存在: ${d.full_name}`);
+      add(`  所有者: ${d.owner.login}`);
+      add(`  私有仓库: ${d.private ? '是' : '否'}`);
+      add(`  PAT 权限: ${d.permissions?.push ? '✓ 可写 (push: true)' : '✗ 只读 (push: false)'}`);
+      add('');
+      if (!d.permissions?.push) {
+        add('❌ PAT 对该仓库只有只读权限，无法推送收藏数据。');
+        add('');
+        add('修复步骤：');
+        add('1. 打开 github.com/settings/personal-access-tokens');
+        add('2. 点进你的 token → Repository access 勾选该仓库');
+        add('3. Permissions → Contents 设为 Read and write → 保存');
+      } else {
+        add('✓ PAT 权限正常，可以推送数据。');
+        add('');
+        add('如果收藏还是报错，把 Awen 主页的完整错误提示截图给我。');
+      }
+    });
+    if (r.status === 404) {
+      add(`❌ 仓库不存在或 PAT 无权访问 ${testRepo}`);
+      add('');
+      add('可能原因：');
+      add('1. 仓库名拼写错误（检查是否少了斜杠或打错字母）');
+      add('2. 仓库是私有的，但 PAT 的 Repository access 没勾选它');
+      add('3. 仓库确实不存在 —— 去 github.com/' + testRepo + ' 确认');
+      return r.text().then(t => { add(''); add('API 返回:'); add(t.slice(0,400)); });
+    }
+    if (r.status === 401) {
+      add('❌ PAT 无效（401 Unauthorized）');
+      add('');
+      add('可能是 PAT 过期、被撤销或粘贴不完整。');
+      add('重新生成一个 token 并保存到 Awen 设置。');
+      return r.text().then(t => { add(''); add('API 返回:'); add(t.slice(0,400)); });
+    }
+    if (r.status === 403) {
+      add('❌ PAT 权限不足或 API 限流（403 Forbidden）');
+      return r.text().then(t => { add(''); add('API 返回:'); add(t.slice(0,400)); });
+    }
+    return r.text().then(t => { add('未预期的状态码，响应:'); add(t.slice(0,400)); });
+  }).catch(e => {
+    add('❌ 网络请求失败: ' + e.message);
+  });
+}
+</script>
+</body></html>
