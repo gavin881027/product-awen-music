@@ -24,6 +24,13 @@
 <script>
 (() => {
   'use strict';
+  // A file:// page has a separate browser storage area and therefore cannot
+  // see the PAT saved by Awen at http://127.0.0.1:8000. Always return to the
+  // running local server when this recovery page is opened by double-click.
+  if (location.protocol === 'file:') {
+    location.replace('http://127.0.0.1:8000/restore-today.html');
+    return;
+  }
   const STORE_KEY = 'awen_matrix_state_v1';
   const REPO = 'gavin881027/awen-music-library';
   const TARGETS = [
