@@ -4647,6 +4647,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 } /*EDITMODE-END*/;
 
 const STORE_KEY = 'awen_matrix_state_v1';
+const STORE_BACKUP_KEY = 'awen_matrix_state_backup_v1';
 const GUIDE_KEY = 'awen_guide_seen_v1';
 
 /* ========== TAB INTRO PANEL ========== */
@@ -4917,7 +4918,15 @@ const MODE_INFO = {
 };
 
 function loadState() {
-  try {return JSON.parse(localStorage.getItem(STORE_KEY)) || null;} catch (e) {return null;}
+  // Keep a rolling prior snapshot. If a browser write is interrupted or the
+  // current value is corrupted, the last known-good state still opens.
+  for (const key of [STORE_KEY, STORE_BACKUP_KEY]) {
+    try {
+      const value = localStorage.getItem(key);
+      if (value) return JSON.parse(value);
+    } catch (e) {}
+  }
+  return null;
 }
 
 function promptIdNumber(id) {
@@ -5588,19 +5597,51 @@ function App() {
     try {if (!localStorage.getItem(GUIDE_KEY)) {setShowGuide(true);localStorage.setItem(GUIDE_KEY, '1');}} catch (e) {}
   }, []);
 
-  // persist
-  // PERF: debounce localStorage writes — at most one write per 400ms, instead of
-  // serializing the entire app state on every keystroke / status cycle / etc.
+  // Persist locally in two layers. Normal changes are debounced to keep the UI
+  // responsive; pagehide/hidden flush immediately so closing the tab cannot
+  // discard the last generated album. The prior snapshot is retained for
+  // recovery if a browser write is interrupted.
   const _writeTimer = React.useRef(null);
+  const _latestState = React.useRef(null);
+  function snapshotState() {
+    return {
+      mode, sel, locks,
+      songs: songs.filter((s) => !s.generating),
+      albums: albums.filter((a) => !a.generating),
+      seq, albumSeq, songPubSeq, albumPubSeq, axisKey, trackCount, sceneKey, moodKey, purposeKey, lang,
+    };
+  }
+  function persistState(snapshot) {
+    if (!snapshot) return;
+    try {
+      const next = JSON.stringify(snapshot);
+      const previous = localStorage.getItem(STORE_KEY);
+      if (previous && previous !== next) localStorage.setItem(STORE_BACKUP_KEY, previous);
+      localStorage.setItem(STORE_KEY, next);
+    } catch (e) {}
+  }
+  React.useLayoutEffect(() => {
+    _latestState.current = snapshotState();
+  }, [mode, sel, locks, songs, albums, seq, albumSeq, songPubSeq, albumPubSeq, axisKey, trackCount, sceneKey, moodKey, purposeKey, lang]);
   React.useEffect(() => {
     if (_writeTimer.current) clearTimeout(_writeTimer.current);
-    _writeTimer.current = setTimeout(() => {
-      const clean = songs.filter((s) => !s.generating);
-      const cleanAlb = albums.filter((a) => !a.generating);
-      try { localStorage.setItem(STORE_KEY, JSON.stringify({ mode, sel, locks, songs: clean, albums: cleanAlb, seq, albumSeq, songPubSeq, albumPubSeq, axisKey, trackCount, sceneKey, moodKey, purposeKey, lang })); } catch (e) {}
-    }, 400);
+    const snapshot = _latestState.current;
+    _writeTimer.current = setTimeout(() => persistState(snapshot), 400);
     return () => { if (_writeTimer.current) clearTimeout(_writeTimer.current); };
-  }, [mode, sel, locks, songs, albums, seq, albumSeq, axisKey, trackCount, sceneKey, moodKey, purposeKey, lang]);
+  }, [mode, sel, locks, songs, albums, seq, albumSeq, songPubSeq, albumPubSeq, axisKey, trackCount, sceneKey, moodKey, purposeKey, lang]);
+  React.useEffect(() => {
+    const flush = () => {
+      if (_writeTimer.current) clearTimeout(_writeTimer.current);
+      persistState(_latestState.current);
+    };
+    const onVisibilityChange = () => { if (document.visibilityState === 'hidden') flush(); };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, []);
 
   function pick(key, val) {setSel((prev) => ({ ...prev, [key]: val }));}
   function toggleLock(key) {setLocks((prev) => ({ ...prev, [key]: !prev[key] }));}
@@ -6428,7 +6469,7 @@ function App() {
         const nextDraft = buildPromptReviewDraft(revisedSubject);
         if (nextDraft.sourceHash === review.sourceHash) {
           // There is nothing new to submit, but preserve the reviewer result.
-          const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, appliedResultSignature: promptReviewResultSignature(result), adoptedRevision: null };
+        const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, appliedResultSignature: promptReviewResultSignature(result), adoptedRevision: null };
           await upsertReviewManifest(nextReview);
           updatePromptReviewSubject(subjectId, nextReview);
         } else {
@@ -6474,7 +6515,7 @@ function App() {
         }
         if (!silent) pushToast(`已直接写入 GPT 修改，并提交第 ${Math.max(1, Number(review.reviewRound) || 1) + 1} 轮审核。`);
       } else {
-        const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, appliedResultSignature: promptReviewResultSignature(result), adoptedRevision: null };
+          const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, appliedResultSignature: promptReviewResultSignature(result), adoptedRevision: null };
         await upsertReviewManifest(nextReview);
         updatePromptReviewSubject(subjectId, nextReview);
         if (!silent) pushToast('审核结论已记录；原始 Suno 配方保持不变。');
