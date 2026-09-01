@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Awen · 今日专辑恢复</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body { max-width: 760px; margin: 48px auto; padding: 0 24px; background:#10141c; color:#e9eef7; line-height:1.65; }
+    h1 { font-size: 26px; } .card { border:1px solid #2e3b51; border-radius:16px; padding:24px; background:#151b25; }
+    button { border:0; border-radius:12px; padding:14px 18px; font-size:16px; font-weight:700; cursor:pointer; background:#55cde1; color:#09212a; }
+    button:disabled { opacity:.55; cursor:wait; } #status { white-space:pre-wrap; color:#aebdd3; } .ok { color:#65e4a6 !important; } .err { color:#ff9e9e !important; }
+  </style>
+</head>
+<body>
+  <h1>恢复今天的 Awen 专辑</h1>
+  <div class="card">
+    <p>将恢复两张已保存到 GitHub 审核仓库的专辑：</p>
+    <ol><li>After Hours Book Café（16 首）</li><li>Pine Air Focus Field（16 首）</li></ol>
+    <p>恢复前会先备份当前浏览器中的 Awen 状态；不会删除现有歌曲或专辑。</p>
+    <button id="restore">从 GitHub 恢复到 Awen</button>
+    <p id="status">准备就绪。</p>
+  </div>
+<script>
+(() => {
+  'use strict';
+  const STORE_KEY = 'awen_matrix_state_v1';
+  const REPO = 'gavin881027/awen-music-library';
+  const TARGETS = [
+    {
+      id: 'ALB-015', album: 'After Hours Book Café', workspace: 'Awen · After Hours Book Café',
+      titles: ['First Open Notebook','Stacks After Nine','Marginalia','Lamp Beside the Cup','Ink Between Lines','Rain on the Front Glass','Half-Filled Page','Quiet Table, Warm Light','Deep in the Chapter','After Midnight Espresso','Pages Drift Slower','Rain Beyond the Shelves','Last Notes in the Margin','Café Near Closing','Final Page','After Hours, Lights Low']
+    },
+    {
+      id: 'ALB-016', album: 'Pine Air Focus Field', workspace: 'Awen · Pine Air Focus Field',
+      titles: ['Cool Dawn Shelter','Pine Air at First Light','Needles Beyond the Eaves','Clear Canopy','Morning Air Field','High Pines, Steady Air','Stillness Under Pine','Shelter in Green Light','Brown Noise in the Pines','Deep Forest Air','Wide Canopy Drift','Air Between Trunks','Noon Approaches','Quiet Pine Noon','Forest Field at Rest','Pine Air, Unbroken']
+    }
+  ];
+  const button = document.querySelector('#restore');
+  const status = document.querySelector('#status');
+  const setStatus = (message, kind = '') => { status.textContent = message; status.className = kind; };
+  const decode = value => decodeURIComponent(Array.prototype.map.call(atob(String(value || '').replace(/\n/g, '')), c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+  async function gh(path, token) {
+    const response = await fetch(`https://api.github.com/repos/${REPO}/contents/${path.split('/').map(encodeURIComponent).join('/')}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }
+    });
+    if (!response.ok) throw new Error(`GitHub ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    return response.json();
+  }
+  const section = (text, name) => (text.match(new RegExp(`### ${name}\\n\\n([\\s\\S]*?)(?=\\n\\n###|$)`)) || [,''])[1].trim();
+  const value = (text, label) => (text.match(new RegExp(`^- ${label}：(.+)$`, 'm')) || [,''])[1].trim();
+  function recipeFromDraft(text, workspace) {
+    const title = value(text, 'Song Title') || value(text, '标题') || 'Untitled';
+    const lyricsRoute = value(text, 'Lyrics 路线') === 'instrumental' ? 'instrumental' : 'structure-prompt';
+    const duration = value(text, 'Duration').match(/(\d+):(\d+)/);
+    return {
+      title, lyricsRoute, structurePrompt: lyricsRoute === 'instrumental' ? '' : section(text, 'Structure Prompt'), lyricsSkeleton: '',
+      style: section(text, 'Style'), exclude: section(text, 'Exclude Styles'),
+      weirdness: Number(value(text, 'Weirdness').replace('%','')) || 50,
+      styleInfluence: Number(value(text, 'Style Influence').replace('%','')) || 70,
+      durationSec: duration ? Number(duration[1]) * 60 + Number(duration[2]) : 300, workspace
+    };
+  }
+  async function restore() {
+    button.disabled = true;
+    try {
+      const token = localStorage.getItem('prompt_review_github_pat') || localStorage.getItem('github_pat');
+      if (!token) throw new Error('未找到已保存的 GitHub PAT。请先打开 Awen 设置并保存 GitHub 同步配置。');
+      setStatus('正在读取 GitHub 审核清单…');
+      const manifestData = await gh('manifest.json', token);
+      const manifest = JSON.parse(decode(manifestData.content));
+      const recovered = [];
+      for (const target of TARGETS) {
+        setStatus(`正在恢复 ${target.album}…`);
+        const entries = target.titles.map((title, index) => {
+          const id = `${target.id}-T${String(index + 1).padStart(2, '0')}`;
+          const matches = (manifest.prompts || []).filter(item => item.id === id && item.title === title && item.sourceFile);
+          const latest = matches.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0];
+          if (!latest) throw new Error(`找不到 ${id} 的可恢复初稿。`);
+          return latest;
+        });
+        const drafts = await Promise.all(entries.map(async entry => ({ entry, data: await gh(entry.sourceFile, token) })));
+        const tracks = drafts.map(({ entry, data }) => {
+          const text = decode(data.content);
+          const recipe = recipeFromDraft(text, target.workspace);
+          const submittedAt = value(text, 'submittedAt') || entry.updatedAt || null;
+          return {
+            title: recipe.title, role: 'Recovered from GitHub audit record', lyrics: recipe.structurePrompt,
+            style: recipe.style, exclude: recipe.exclude, sunoRecipe: recipe,
+            promptReview: { key: entry.key, id: entry.id, title: entry.title, status: entry.status || 'in_review', sourceHash: entry.sourceHash, sourcePath: entry.sourceFile, submittedAt, reviewRound: 1, reviewCount: Number(entry.reviewCount || 0), latestReviewPath: entry.latestReviewFile || null, approvedPath: entry.approvedFile || null, applicationPath: entry.applicationFile || null }
+          };
+        });
+        recovered.push({ id: target.id, axisLabel: 'Recovered from GitHub', base: {}, status: 'Draft', generating: false, starred: false, aiProvider: 'GitHub recovery', aiProviderUsed: false, createdAt: new Date().toLocaleString('zh-CN'), data: { album: target.album, workspace: target.workspace, anchor: tracks[0].style, tracks, cover: '', video: '', thumb: '' } });
+      }
+      const previousText = localStorage.getItem(STORE_KEY);
+      localStorage.setItem(`${STORE_KEY}_backup_before_recovery_${Date.now()}`, previousText || '{}');
+      const previous = JSON.parse(previousText || '{}');
+      const retained = (previous.albums || []).filter(album => !TARGETS.some(target => target.id === album.id));
+      const maxId = Math.max(...recovered.concat(retained).map(item => Number(String(item.id || '').match(/ALB-(\d+)/)?.[1]) || 0), 0);
+      const next = { ...previous, mode: 'album', albums: [...recovered, ...retained], songs: previous.songs || [], albumSeq: Math.max(Number(previous.albumSeq || 1), maxId + 1) };
+      localStorage.setItem(STORE_KEY, JSON.stringify(next));
+      setStatus('恢复成功：两张专辑与 32 首审核配方已经恢复。现在回到 Awen 页面并刷新即可查看。', 'ok');
+    } catch (error) {
+      setStatus(`恢复失败：${error.message || error}`, 'err');
+      button.disabled = false;
+    }
+  }
+  button.addEventListener('click', restore);
+})();
+</script>
+</body>
+</html>
