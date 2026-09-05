@@ -49,23 +49,38 @@ try {
     const data = window.AWEN.fallbackAlbum('day', window.AWEN.DEFAULTS, built.recipes);
     data.tracks[0].lyrics += ' warm tape saturation and rainy-window focus'.repeat(12000);
     const album = { id: 'ALB-991', data, base: window.AWEN.DEFAULTS, status: 'Queued', starred: false };
-    const state = JSON.stringify({ mode: 'album', albums: [album], songs: [] });
+    const recovered = { id: 'ALB-992', data: structuredClone(data), base: window.AWEN.DEFAULTS, status: 'Draft', starred: false };
+    recovered.data.album = 'Workspace-only recovery album';
+    const state = JSON.stringify({ mode: 'album', albums: [album, recovered], songs: [] });
+    // A prior non-empty base used to prevent recovery, after which loading the
+    // library silently replaced the two-album shelf with this one record.
+    localStorage.setItem('awen_local_library_v1', JSON.stringify({ version: 3, songs: [{
+      id: album.id, type: 'album', title: data.album, axisLabel: 'Day Arc',
+      status: 'Queued', base: window.AWEN.DEFAULTS, albumSnapshot: { ...album, starred: true }, sunoRecipes: []
+    }], sync: { repo: 'awenstudio/product-awen-music', base: [], pending: false, conflicts: [] } }));
     localStorage.setItem('awen_matrix_state_v1', state);
     window.addEventListener('pagehide', () => localStorage.setItem('awen_matrix_state_v1', state));
   });
   await page.reload();
   await page.getByRole('button', { name: 'Album', exact: true }).waitFor();
-  await page.getByRole('button', { name: /展开 3 首曲目 Prompt/ }).waitFor();
+  await page.getByRole('button', { name: /展开 3 首曲目 Prompt/ }).first().waitFor();
+  assert.equal(await page.getByRole('button', { name: /展开 3 首曲目 Prompt/ }).count(), 2,
+    'Background reconciliation must retain the workspace-only Album');
   assert.equal(errors.length, 0, errors.join('\n'));
   // The app's canonical-library recovery saves this oversized album locally
   // during boot; the card must remain readable and marked saved after reload.
-  await page.locator('button[title="已收藏到曲库"]').waitFor();
+  await page.locator('button[title="已收藏到曲库"]').first().waitFor();
   await page.reload();
-  await page.getByRole('button', { name: /展开 3 首曲目 Prompt/ }).waitFor();
-  await page.locator('button[title="已收藏到曲库"]').waitFor();
+  await page.getByRole('button', { name: /展开 3 首曲目 Prompt/ }).first().waitFor();
+  await page.locator('button[title="已收藏到曲库"]').first().waitFor();
   await page.getByRole('button', { name: '重试曲库同步', exact: true }).click();
   await page.reload();
-  await page.getByRole('button', { name: /展开 3 首曲目 Prompt/ }).waitFor();
+  await page.getByRole('button', { name: /展开 3 首曲目 Prompt/ }).first().waitFor();
+  const recoveryDownload = page.waitForEvent('download');
+  await page.getByRole('button', { name: '导出本地备份 / 冲突明细', exact: true }).click();
+  const recoveryFile = await recoveryDownload;
+  assert.equal(recoveryFile.suggestedFilename(), 'awen-local-recovery.json');
+  await page.getByRole('alert').filter({ hasText: '本地恢复包已开始下载' }).waitFor();
   // Disk failure must produce visible feedback and keep the prior bytes.
   const beforeFailure = await page.evaluate(() => localStorage.getItem('awen_local_library_v1'));
   await page.evaluate(() => {

@@ -5914,7 +5914,12 @@ function App() {
         key.startsWith(STORE_KEY + '.') || key.startsWith(LOCAL_LIB_KEY + '.writer.') || key.startsWith('awen_review_operation_v1.'))
         .map(key => [key, decodeAwenStoredValue(localStorage.getItem(key))])) };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
-    const a = document.createElement('a'); a.href = url; a.download = 'awen-local-recovery.json'; a.click();
+    // Some embedded browsers ignore a click on a detached anchor. Attach it
+    // for the user gesture, then remove it immediately after the download is
+    // handed to the browser so the export control never fails silently.
+    const a = document.createElement('a'); a.href = url; a.download = 'awen-local-recovery.json';
+    a.style.display = 'none'; document.body.appendChild(a); a.click(); a.remove();
+    pushToast('本地恢复包已开始下载。', { kind: 'info' });
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   function mergeLibraryItems(remoteItems, localItems, preferLocal = true) {
@@ -6164,12 +6169,18 @@ function App() {
     try {
       const store = getLibraryStore();
       let disk = store.read();
-      // Recover browser-only completed albums regardless of the old schema
-      // marker; existing IDs are never replaced by a shelf snapshot.
+      // The workspace is a separate local record and can legitimately contain
+      // completed Albums not yet represented in a prior GitHub baseline. Never
+      // replace that shelf with a shorter library snapshot during background
+      // reconciliation: first add missing completed Albums to the local
+      // canonical record, where they stay pending until an explicit sync.
       const ids = new Set(disk.songs.map(item => item.id));
       const recovered = (albumsRef.current || []).filter(a => a.data && !a.generating && !ids.has(a.id))
         .map(a => albumLibraryEntry(a));
-      if (recovered.length && !disk.sync.base) disk = store.save([...disk.songs, ...recovered]);
+      if (recovered.length) {
+        disk = store.save([...disk.songs, ...recovered]);
+        pushToast(`已保留 ${recovered.length} 张仅在本地工作区的专辑，等待你确认同步。`, { kind: 'warn', duration: 10000 });
+      }
       const unmatched = (albumsRef.current || []).filter(album => album.localRevision &&
         disk.songs.some(item => item.id === album.id && item.albumSnapshot?.localRevision !== album.localRevision));
       setCanonicalLibraryItems(disk.songs, { persist: false, syncAlbumShelf: !unmatched.length });
