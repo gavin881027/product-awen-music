@@ -5493,7 +5493,7 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
                 )}
                 <label className="settings-field full">
                   <span className="settings-hint">API Key（留空会保留当前 Provider 已存的 Key）</span>
-                  {currentProvider.apiKey && <span className="settings-stored">已存储: ···{currentProvider.apiKey.slice(-6)}</span>}
+                  {currentProvider.apiKey && <span className="settings-stored">API Key 已存储（内容不显示）</span>}
                   <input className="settings-input" type="password" value={apiKeyVal}
                     placeholder="sk-... / tp-..." onChange={e => setApiKeyVal(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && saveProvider()} />
