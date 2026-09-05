@@ -6275,7 +6275,13 @@ function App() {
     const localUpdated = source.some(item => item.id === album.id)
       ? source.map(item => item.id === album.id ? entry : item)
       : [entry, ...source];
-    if (!setCanonicalLibraryItems(localUpdated)) return false;
+    // setCanonicalLibraryItems protects status fields using the current shelf.
+    // A manual status click is newer than that shelf, so explicitly carry its
+    // proposed durable value into the same local commit instead of letting the
+    // old in-memory value overwrite it before React can render the result.
+    const statusOverrides = localAlbumStatusMap(readLocalLibrary(), albumsRef.current);
+    if (statusWrite) statusOverrides.set(album.id, album.status || entry.status || 'Draft');
+    if (!setCanonicalLibraryItems(localUpdated, { localAlbumStatuses: statusOverrides })) return false;
     if (!safeLS.get('github_pat')) {
       if (!silent) pushToast(
         successMessage

@@ -66,6 +66,16 @@ try {
   await page.getByRole('button', { name: /展开 3 首曲目 Prompt/ }).first().waitFor();
   assert.equal(await page.getByRole('button', { name: /展开 3 首曲目 Prompt/ }).count(), 2,
     'Background reconciliation must retain the workspace-only Album');
+  // A manual Album status must win over the older shelf value and survive a
+  // reload; this is the exact card control exposed by the status tooltip.
+  await page.getByRole('button', { name: 'Album status: Queued, click to cycle', exact: true }).click();
+  try {
+    await page.getByRole('button', { name: 'Album status: Published, click to cycle', exact: true }).waitFor();
+  } catch (error) {
+    const statuses = await page.locator('.status').allTextContents();
+    const notices = await page.locator('[role="status"], [role="alert"]').allTextContents();
+    throw new Error(`Status did not persist: ${statuses.join(' | ')} / ${notices.join(' | ')}`);
+  }
   assert.equal(errors.length, 0, errors.join('\n'));
   // The app's canonical-library recovery saves this oversized album locally
   // during boot; the card must remain readable and marked saved after reload.
@@ -73,6 +83,7 @@ try {
   await page.reload();
   await page.getByRole('button', { name: /展开 3 首曲目 Prompt/ }).first().waitFor();
   await page.locator('button[title="已收藏到曲库"]').first().waitFor();
+  await page.getByRole('button', { name: 'Album status: Published, click to cycle', exact: true }).waitFor();
   await page.getByRole('button', { name: '重试曲库同步', exact: true }).click();
   await page.reload();
   await page.getByRole('button', { name: /展开 3 首曲目 Prompt/ }).first().waitFor();
@@ -90,7 +101,7 @@ try {
       return set.call(this, key, value);
     };
   });
-  await page.getByRole('button', { name: 'Album status: Queued, click to cycle', exact: true }).click();
+  await page.getByRole('button', { name: 'Album status: Published, click to cycle', exact: true }).click();
   await page.getByRole('status').filter({ hasText: '本地保存未完成' }).waitFor();
   assert.equal(await page.evaluate(() => localStorage.getItem('awen_local_library_v1')), beforeFailure);
   assert.equal(writes, 0, 'No real or mocked business PUT was needed');
