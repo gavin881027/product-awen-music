@@ -169,6 +169,24 @@ test('曲库备份空间不足仍保存主记录，并给出备份告警', () =>
   assert.equal(store.read().songs[0].title, 'new');
   assert.match(store.getBackupWarning(), /空间不足/);
 });
+test('压缩存储无损还原 Unicode，并仅在实际缩小时替换主记录', () => {
+  const storage = memory();
+  const compact = R.createCompactingStorage(storage, ['state']);
+  const raw = JSON.stringify({ title: '雨窗微光 → 🌧', prompt: 'warm tape saturation, '.repeat(50000) });
+  compact.setItem('state', raw);
+  assert.equal(compact.getItem('state'), raw);
+  assert.ok(storage.getItem('state').length < raw.length / 2);
+});
+test('压缩曲库主记录可在重开后读取，避免重复 prompt 文本触发配额写入', () => {
+  const storage = memory();
+  const compact = R.createCompactingStorage(storage, ['lib', 'lib.backup']);
+  const repeated = 'lo-fi study instrumental, warm tape saturation, '.repeat(30000);
+  const first = R.createStore(compact, 'lib', 'a/b');
+  first.save([item('1', repeated)]);
+  const encoded = storage.getItem('lib');
+  assert.ok(encoded.length < repeated.length / 2);
+  assert.equal(R.createStore(compact, 'lib', 'a/b').read().songs[0].title, repeated);
+});
 test('大型本地与远端差异只保存冲突索引和 GitHub SHA，不复制整份远端曲库', () => {
   const storage = memory();
   const store = R.createStore(storage, 'lib', 'a/b');
@@ -182,6 +200,15 @@ test('大型本地与远端差异只保存冲突索引和 GitHub SHA，不复制
   assert.equal(reconciled.sync.conflicts[0].compacted, true);
   assert.equal(reconciled.sync.conflicts[0].remoteHash, R.fingerprint(remote[0]));
   assert.doesNotMatch(storage.getItem('lib'), /remote-b/);
+});
+test('重复读取同一远端版本不累积相同冲突记录', () => {
+  const store = R.createStore(memory(), 'lib', 'a/b');
+  store.save([item('1', 'local-' + 'a'.repeat(300000))]);
+  const remoteRef = { repo: 'a/b', path: 'docs/library.json', sha: 'same-remote-sha' };
+  const remote = [item('1', 'remote-' + 'b'.repeat(300000))];
+  store.reconcile(remote, remoteRef);
+  const again = store.reconcile(remote, remoteRef);
+  assert.equal(again.sync.conflicts.length, 1);
 });
 test('浏览器 PAT 写入测试只使用隔离分支，写后按 SHA 回读确认', async () => {
   const files = new Map();

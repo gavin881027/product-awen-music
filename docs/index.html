@@ -4717,6 +4717,10 @@ const STORE_KEY = 'awen_matrix_state_v1';
 const STORE_BACKUP_KEY = 'awen_matrix_state_backup_v1';
 const GUIDE_KEY = 'awen_guide_seen_v1';
 
+function decodeAwenStoredValue(value) {
+  return window.AwenReliability?.unpackText ? window.AwenReliability.unpackText(value) : value;
+}
+
 /* ========== TAB INTRO PANEL ========== */
 const TAB_INTROS = {
   zh: {
@@ -4987,9 +4991,9 @@ const MODE_INFO = {
 function loadState() {
   // Keep a rolling prior snapshot. If a browser write is interrupted or the
   // current value is corrupted, the last known-good state still opens.
-  for (const key of [STORE_KEY, STORE_BACKUP_KEY]) {
+  for (const key of [STORE_KEY, STORE_KEY + '.backup', STORE_BACKUP_KEY]) {
     try {
-      const value = localStorage.getItem(key);
+      const value = decodeAwenStoredValue(localStorage.getItem(key));
       if (value) {
         const parsed = JSON.parse(value);
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
@@ -5655,6 +5659,7 @@ function App() {
   const [workspaceError, setWorkspaceError] = React.useState('');
   const [snapshotConflict, setSnapshotConflict] = React.useState('');
   const libraryStoreRef = React.useRef(null);
+  const libraryStorageRef = React.useRef(null);
   const libraryRequestRef = React.useRef(0);
   // Every write goes through one queue.  A batch album review can update many
   // tracks at once; serialising those writes prevents later status snapshots
@@ -5718,8 +5723,13 @@ function App() {
   // responsive; pagehide/hidden flush immediately so closing the tab cannot
   // discard the last generated album. The prior snapshot is retained for
   // recovery if a browser write is interrupted.
+  const workspaceStorageRef = React.useRef(null);
+  if (!workspaceStorageRef.current) {
+    workspaceStorageRef.current = window.AwenReliability.createCompactingStorage(localStorage,
+      [STORE_KEY, STORE_KEY + '.backup']);
+  }
   const workspaceStore = React.useRef(null);
-  if (!workspaceStore.current) workspaceStore.current = window.AwenReliability.createWorkspaceStore(localStorage, STORE_KEY);
+  if (!workspaceStore.current) workspaceStore.current = window.AwenReliability.createWorkspaceStore(workspaceStorageRef.current, STORE_KEY);
   const _writeTimer = React.useRef(null);
   const _latestState = React.useRef(null);
   function snapshotState() {
@@ -5848,13 +5858,13 @@ function App() {
   }
   function readLocalLibrary() {
     try {
-      const parsed = JSON.parse(safeLS.get(LOCAL_LIB_KEY) || 'null');
+      const parsed = JSON.parse(decodeAwenStoredValue(safeLS.get(LOCAL_LIB_KEY)) || 'null');
       return Array.isArray(parsed?.songs) ? parsed.songs.map(hydrateLibraryItem).filter(Boolean) : [];
     } catch (e) { return []; }
   }
   function localLibrarySchemaVersion() {
     try {
-      return Number(JSON.parse(safeLS.get(LOCAL_LIB_KEY) || 'null')?.version || 0);
+      return Number(JSON.parse(decodeAwenStoredValue(safeLS.get(LOCAL_LIB_KEY)) || 'null')?.version || 0);
     } catch (e) { return 0; }
   }
   function writeLocalLibrary(items) {
@@ -5873,17 +5883,22 @@ function App() {
   }
   function getLibraryStore() {
     const repo = getGitHubRepo();
+    if (!libraryStorageRef.current) {
+      libraryStorageRef.current = window.AwenReliability.createCompactingStorage(localStorage,
+        [LOCAL_LIB_KEY, LOCAL_LIB_KEY + '.backup']);
+    }
     if (libraryStoreRef.current?.repo !== repo) {
-      libraryStoreRef.current = { repo, store: window.AwenReliability.createStore(localStorage, LOCAL_LIB_KEY, repo) };
+      libraryStoreRef.current = { repo, store: window.AwenReliability.createStore(libraryStorageRef.current, LOCAL_LIB_KEY, repo) };
     }
     return libraryStoreRef.current.store;
   }
   function exportReliabilityBackup() {
     const payload = { exportedAt: new Date().toISOString(), state: snapshotState(),
-      library: safeLS.get(LOCAL_LIB_KEY), previousLibrary: safeLS.get(LOCAL_LIB_KEY + '.backup'),
+      library: decodeAwenStoredValue(safeLS.get(LOCAL_LIB_KEY)),
+      previousLibrary: decodeAwenStoredValue(safeLS.get(LOCAL_LIB_KEY + '.backup')),
       recovery: Object.fromEntries(Object.keys(localStorage).filter(key =>
         key.startsWith(STORE_KEY + '.') || key.startsWith(LOCAL_LIB_KEY + '.writer.') || key.startsWith('awen_review_operation_v1.'))
-        .map(key => [key, localStorage.getItem(key)])) };
+        .map(key => [key, decodeAwenStoredValue(localStorage.getItem(key))])) };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
     const a = document.createElement('a'); a.href = url; a.download = 'awen-local-recovery.json'; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);

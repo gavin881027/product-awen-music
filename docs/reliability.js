@@ -1,6 +1,78 @@
 /* Local durability and GitHub transport. No credentials are stored here. */
 (function (root) {
   const clone = value => JSON.parse(JSON.stringify(value));
+  const COMPACT_PREFIX = 'awen-lz78-v1:';
+  // localStorage counts UTF-16 code units and gives a whole origin a small
+  // shared quota. LZ78 keeps this synchronous (the persistence callers need a
+  // definite result before showing success), preserves every code unit, and
+  // only replaces a value when it is actually shorter than the original.
+  function packText(text) {
+    const input = String(text);
+    const dictionary = new Map();
+    const output = [];
+    let phrase = '';
+    let nextCode = 1;
+    for (let index = 0; index < input.length; index += 1) {
+      const character = input.charAt(index);
+      const candidate = phrase + character;
+      if (dictionary.has(candidate)) {
+        phrase = candidate;
+        continue;
+      }
+      output.push(String.fromCharCode(phrase ? dictionary.get(phrase) : 0), character);
+      if (nextCode === 0xffff) {
+        dictionary.clear();
+        nextCode = 1;
+      }
+      dictionary.set(candidate, nextCode);
+      nextCode += 1;
+      phrase = '';
+    }
+    if (phrase) output.push(String.fromCharCode(0xffff), String.fromCharCode(dictionary.get(phrase)));
+    const packed = output.join('');
+    return packed.length + COMPACT_PREFIX.length < input.length ? COMPACT_PREFIX + packed : input;
+  }
+  function unpackText(value) {
+    if (typeof value !== 'string' || !value.startsWith(COMPACT_PREFIX)) return value;
+    const input = value.slice(COMPACT_PREFIX.length);
+    if (input.length % 2) throw new Error('本地压缩记录不完整；已停止覆盖，请导出恢复包。');
+    const dictionary = [''];
+    const output = [];
+    let nextCode = 1;
+    for (let index = 0; index < input.length; index += 2) {
+      const prefix = input.charCodeAt(index);
+      const suffix = input.charCodeAt(index + 1);
+      if (prefix === 0xffff) {
+        if (!dictionary[suffix]) throw new Error('本地压缩记录损坏；已停止覆盖，请导出恢复包。');
+        output.push(dictionary[suffix]);
+        continue;
+      }
+      const base = prefix ? dictionary[prefix] : '';
+      if (base === undefined) throw new Error('本地压缩记录损坏；已停止覆盖，请导出恢复包。');
+      const phrase = base + String.fromCharCode(suffix);
+      output.push(phrase);
+      if (nextCode === 0xffff) {
+        dictionary.length = 1;
+        nextCode = 1;
+      }
+      dictionary[nextCode] = phrase;
+      nextCode += 1;
+    }
+    return output.join('');
+  }
+  function createCompactingStorage(storage, keys) {
+    const compactKeys = new Set(keys || []);
+    return {
+      get length() { return storage.length; },
+      key(index) { return storage.key(index); },
+      getItem(key) {
+        const value = storage.getItem(key);
+        return compactKeys.has(key) ? unpackText(value) : value;
+      },
+      setItem(key, value) { storage.setItem(key, compactKeys.has(key) ? packText(value) : value); },
+      removeItem(key) { storage.removeItem(key); },
+    };
+  }
   function stable(value) {
     if (Array.isArray(value)) return '[' + value.map(stable).join(',') + ']';
     if (value && typeof value === 'object') return '{' + Object.keys(value).sort()
@@ -30,7 +102,17 @@
     return JSON.stringify(items).length <= SYNC_SNAPSHOT_MAX_CHARS ? clone(items) : null;
   }
   function boundedConflicts(conflicts, remoteRef) {
-    const list = conflicts || [];
+    const seen = new Set();
+    const list = (conflicts || []).filter(conflict => {
+      const key = [conflict.id,
+        conflict.baseHash || (conflict.base ? fingerprint(conflict.base) : ''),
+        conflict.localHash || (conflict.local ? fingerprint(conflict.local) : ''),
+        conflict.remoteHash || (conflict.remote ? fingerprint(conflict.remote) : ''),
+        conflict.remoteRef?.sha || remoteRef?.sha || ''].join('|');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     if (JSON.stringify(list).length <= SYNC_CONFLICT_MAX_CHARS) return list;
     return list.map(({ id, base, local, remote }) => ({
       id,
@@ -128,7 +210,11 @@
         return commit({ version: 3, songs: combined.items, sync: { ...disk.sync,
           base, remoteRef: base ? null : remoteRef,
           pending: !equal(combined.items, remote),
-          conflicts: boundedConflicts([...(disk.sync.conflicts || []), ...combined.conflicts], remoteRef) } });
+          // GitHub already retains every earlier remote blob by SHA. Persist
+          // the current unresolved pair only; appending the same conflict on
+          // every reload both exhausts localStorage and turns one conflict
+          // into an ever-growing count.
+          conflicts: boundedConflicts(combined.conflicts, remoteRef) } });
       },
       acknowledge(sent, sha) {
         const disk = read(); // never restore the earlier request snapshot over current edits
@@ -305,7 +391,7 @@
     if (confirmed.text !== text || confirmed.sha !== response.content.sha) throw new Error('GitHub 测试文件回读与写入内容不一致。');
     return { repo, branch, path, sha: confirmed.sha, createdBranch };
   }
-  const api = { stable, equal, fingerprint, merge, cleanupProvisionalWriterKeys, createStore, createWorkspaceStore, createOperationJournal, githubJSON, readContent, verifyGitHubWrite };
+  const api = { stable, equal, fingerprint, packText, unpackText, createCompactingStorage, merge, cleanupProvisionalWriterKeys, createStore, createWorkspaceStore, createOperationJournal, githubJSON, readContent, verifyGitHubWrite };
   if (typeof module !== 'undefined') module.exports = api;
   root.AwenReliability = api;
 })(typeof window === 'undefined' ? globalThis : window);

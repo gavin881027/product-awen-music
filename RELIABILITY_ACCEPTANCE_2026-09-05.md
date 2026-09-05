@@ -92,3 +92,25 @@ localStorage 仍受容量限制，恢复分支/完成日志会占空间；失败
   - `gavin881027/suno-prompt-chatgpt:codex-reliability-audit-20260905/reliability-audit/browser-pat-write.json`，文件 SHA `5725f064b1aff0c940e3409ebc76694198a58b6b`。
 - 两次写入均由页面按正文和 SHA 回读确认；两个 main SHA 仍分别为 `1b0b4342003e9b7741432b48956fa8459d488c9d`、`954fdae7521a3bfd5dc8494ed56918e642555291`。两仓库各自 Actions workflow 数为 0，未触发已知工作流。
 - 新增“大型差异只保留索引和远端 SHA”的回归；`tests/reliability.test.mjs` 22/22 通过。完整 Node 回归现为 36/36 通过，服务/启动/浏览器场景通过记录保持有效。
+
+
+## 收藏时再次出现存储配额错误（2026-09-05）
+
+### 现象与根因
+
+正式浏览器在 Album 点击收藏后同时报出 `awen_matrix_state_v1` 与 `awen_local_library_v1` 的 `Storage quota exceeded`。此前修复已清理历史 writer 临时副本和大型远端冲突副本，但收藏仍会把整份工作区和整份曲库 JSON 写回同一浏览器来源；包含大量重复 prompt 正文的历史记录仍可能超过该来源的空间上限。
+
+### 修复
+
+- 对这两个主记录及各自滚动备份采用同步、无损、向后兼容的 UTF-16 LZ78 压缩：只有压缩后更短才替换存储值，既有未压缩值仍可读取。
+- 恢复包导出时自动解码，导出的 JSON 保持可读；主记录写入仍先写临时值、再切换主值，不能因压缩失败误报成功。
+- 同一远端版本反复对账时只保存本轮冲突索引，不再追加旧冲突正文或重复索引；远端正文仍由 GitHub blob/SHA 保留，本地正文仍由本地曲库记录保留。
+
+### 验证
+
+- 正式页面重新加载后可读取 14 张历史专辑，状态为“本地已保留 · 22 项版本冲突待核对”，未再显示两个主记录的配额错误。
+- `node --test tests/*.test.mjs`：39/39 通过；新增压缩往返、压缩后刷新读取、重复对账不累积冲突三项回归。
+- `python3 tests/server-reliability-test.py` 与 `python3 tests/startup-build-sync-test.py` 通过。
+- 隔离浏览器执行真实 React 保存、刷新和超大重复 prompt 场景通过；所有 GitHub/API 流量被拦截，零远程写入。
+
+正式 profile 未再次点击未收藏专辑的收藏按钮：该操作会启动已有 PAT 的业务 main 同步，而当前 22 项历史差异尚未裁决。以上正式重新加载验证与隔离浏览器行为测试证明本地保存路径已可写且可重读；待冲突裁决后再执行业务 main 同步验收。

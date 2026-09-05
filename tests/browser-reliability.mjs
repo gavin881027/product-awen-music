@@ -24,20 +24,22 @@ try {
   await page.evaluate(() => {
     const built = window.AWEN.buildAlbum('day', window.AWEN.DEFAULTS, 3);
     const data = window.AWEN.fallbackAlbum('day', window.AWEN.DEFAULTS, built.recipes);
-    const album = { id: 'ALB-991', data, base: window.AWEN.DEFAULTS, status: 'Queued', starred: true };
+    data.tracks[0].lyrics += ' warm tape saturation and rainy-window focus'.repeat(12000);
+    const album = { id: 'ALB-991', data, base: window.AWEN.DEFAULTS, status: 'Queued', starred: false };
     const state = JSON.stringify({ mode: 'album', albums: [album], songs: [] });
     localStorage.setItem('awen_matrix_state_v1', state);
     window.addEventListener('pagehide', () => localStorage.setItem('awen_matrix_state_v1', state));
-    localStorage.setItem('awen_local_library_v1', JSON.stringify({ version: 3, songs: [{
-      id: album.id, type: 'album', title: 'ISOLATED AUDIT', status: 'Queued', albumSnapshot: album,
-    }] }));
   });
   await page.reload();
   await page.getByRole('button', { name: 'Album', exact: true }).waitFor();
   await page.getByRole('button', { name: /展开 3 首曲目 Prompt/ }).waitFor();
   assert.equal(errors.length, 0, errors.join('\n'));
-  const before = await page.evaluate(() => JSON.parse(localStorage.getItem('awen_local_library_v1')));
-  assert.equal(before.songs[0].status, 'Queued');
+  // The app's canonical-library recovery saves this oversized album locally
+  // during boot; the card must remain readable and marked saved after reload.
+  await page.locator('button[title="已收藏到曲库"]').waitFor();
+  await page.reload();
+  await page.getByRole('button', { name: /展开 3 首曲目 Prompt/ }).waitFor();
+  await page.locator('button[title="已收藏到曲库"]').waitFor();
   await page.getByRole('button', { name: '重试曲库同步', exact: true }).click();
   await page.reload();
   await page.getByRole('button', { name: /展开 3 首曲目 Prompt/ }).waitFor();
