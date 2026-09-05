@@ -32,18 +32,13 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-# 检查端口是否被占用，自动寻找可用端口
-for P in 8000 8001 8002 8080; do
-    if ! lsof -i :$P &> /dev/null 2>&1; then
-        PORT=$P
-        break
+# Browser storage is origin-specific. Never silently change the port.
+if lsof -nP -iTCP:8000 -sTCP:LISTEN >/dev/null 2>&1; then
+    if python3 check_server.py --port 8000; then
+        open "http://127.0.0.1:8000/"
+        exit 0
     fi
-done
-
-# 如果所有端口都被占用
-if lsof -i :$PORT &> /dev/null 2>&1; then
-    echo "⚠️  常用端口都被占用，请手动检查"
-    read -p "按回车键关闭..."
+    echo "8000 上的服务不是当前版本。请先停止旧服务，再重新启动；未切换数据端口。"
     exit 1
 fi
 

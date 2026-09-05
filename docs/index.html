@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
+<script src="reliability.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <script>
   // Opening docs/index.html directly creates a file:// origin. Provider calls
@@ -281,6 +282,9 @@
   .status.s-queued .status-dot{ background:#56b6e6; }
   .status.s-published{ color:var(--accent); border-color:var(--accent); }
   .status.s-published .status-dot{ background:var(--accent); }
+  .status.s-discarded{ color:#f06b73; border-color:rgba(240,107,115,.55); }
+  .status.s-discarded .status-dot{ background:#f06b73; }
+  .status.status-readonly{ cursor:default; }
   .icon-btn{ width:24px; height:24px; border-radius:7px; border:1px solid var(--line); background:transparent;
              color:var(--ink-faint); font-size:16px; line-height:1; cursor:pointer; }
   .icon-btn:hover{ color:var(--ink); border-color:var(--line2); }
@@ -1785,7 +1789,7 @@
       clearAll: '清空',
       emptySong: '还没有歌曲。在矩阵盘上拼一个配方，点「生成」。',
       emptyAlbum: '还没有专辑。在矩阵上定好声音身份，选一条行进轴，开始生成。',
-      stDraft: '草稿', stApproved: '已采用', stQueued: '排队中', stPublished: '已发布',
+      stDraft: '草稿', stApproved: '已采用', stQueued: '排队中', stPublished: '已发布', stDiscarded: '舍弃 ❌',
       sunoHint: '→ 风格框 + 描述框',
       veoHint: '→ 视频生成',
       copyForSuno: '复制到 Suno',
@@ -1863,7 +1867,7 @@
       clearAll: 'clear all',
       emptySong: 'No songs yet. Build a recipe on the matrix and hit Generate.',
       emptyAlbum: 'No albums yet. Set the sonic identity, pick a traversal axis, and build.',
-      stDraft: 'Draft', stApproved: 'Approved', stQueued: 'Queued', stPublished: 'Published',
+      stDraft: 'Draft', stApproved: 'Approved', stQueued: 'Queued', stPublished: 'Published', stDiscarded: 'Discarded ❌',
       sunoHint: '→ Style box + Description',
       veoHint: '→ video',
       copyForSuno: 'Copy for Suno',
@@ -1992,9 +1996,9 @@
 })();
 
 </script>
-<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="vendor/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
+<script src="vendor/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
+<script src="vendor/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
 <script type="text/babel">
 // @ds-adherence-ignore -- omelette starter scaffold (raw elements/hex/px by design)
 
@@ -2748,6 +2752,46 @@ function fromBase64Utf8(value) {
   return new TextDecoder().decode(bytes);
 }
 
+// GitHub's Contents API returns base64, while the payloads in this project
+// are UTF-8 JSON/Markdown.  A direct `JSON.parse(atob(...))` treats each byte
+// as Latin-1 and turns Chinese into mojibake such as "Ã¥Â®...".  Decode all
+// remote content through this helper instead.  The repair pass also handles
+// records written by older builds that already persisted the mojibake.
+function decodeGitHubUtf8(value) {
+  return fromBase64Utf8(value);
+}
+
+function repairUtf8Mojibake(value) {
+  // Common UTF-8-as-Latin-1 signatures include Chinese (`å…³` / `Ã...`), arrows
+  // (`â†’`) and emoji (`ð...`).  The original narrow Ã/Â check missed the
+  // arrow form used in reviewed structure prompts.
+  const mojibakePattern = /[ÃÂâåð]/;
+  if (typeof value !== 'string' || !mojibakePattern.test(value)) return value;
+  // `escape` is intentionally used only as a compatibility bridge for the
+  // legacy Latin-1 string produced by the old decoder.
+  let repaired = value;
+  for (let pass = 0; pass < 3 && mojibakePattern.test(repaired); pass += 1) {
+    if ([...repaired].some(char => char.charCodeAt(0) > 255)) break;
+    try {
+      const next = decodeURIComponent(escape(repaired));
+      if (next === repaired) break;
+      repaired = next;
+    } catch (e) {
+      break;
+    }
+  }
+  return repaired;
+}
+
+function repairUtf8MojibakeDeep(value) {
+  if (typeof value === 'string') return repairUtf8Mojibake(value);
+  if (Array.isArray(value)) return value.map(repairUtf8MojibakeDeep);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, repairUtf8MojibakeDeep(entry)]));
+  }
+  return value;
+}
+
 function reviewSafeText(value) {
   return String(value || '').replace(/\r\n/g, '\n').trim();
 }
@@ -3011,7 +3055,7 @@ Object.assign(window, { Icon, Chip, Column, BpmColumn, Placeholder, ReferenceCar
 /* Awen Study — recipe console + generated song card. Babel JSX, exports to window. */
 const { useState: useStateC } = React;
 
-const STATUS_ORDER = ['Draft', 'Approved', 'Queued', 'Published'];
+const STATUS_ORDER = ['Draft', 'Approved', 'Queued', 'Published', 'Discarded'];
 
 /* ---------- the live recipe / action console ---------- */
 function RecipeBar({ sel, mode, busy, mutations, onGenerate, onShuffle }) {
@@ -3153,7 +3197,9 @@ function buildSunoRecipe(suno, title, workspace, defaults) {
 function attachSongSunoRecipe(ai, defaults, workspace = 'Awen · Singles') {
   if (!ai) return ai;
   const suno = ai.suno || {};
-  return { ...ai, suno: { ...suno, recipe: buildSunoRecipe(suno, ai.title, workspace, defaults) } };
+  return { ...ai, suno: { ...suno, recipe: suno.recipe
+    ? normalizeSunoRecipe(suno.recipe, { title: ai.title, workspace })
+    : buildSunoRecipe(suno, ai.title, workspace, defaults) } };
 }
 function attachAlbumSunoRecipes(data, defaults) {
   if (!data) return data;
@@ -3164,7 +3210,7 @@ function attachAlbumSunoRecipes(data, defaults) {
     // the explicit null makes the initial "ChatGPT 审核 · 尚未提交" state
     // durable when the album is later saved to the local/GitHub library.
     promptReview: tr.promptReview || null,
-    sunoRecipe: buildSunoRecipe({
+    sunoRecipe: tr.sunoRecipe ? normalizeSunoRecipe(tr.sunoRecipe, { title: tr.title, workspace }) : buildSunoRecipe({
       lyrics: tr.lyrics,
       style: tr.style || data.anchor,
       exclude: tr.exclude || SUNO_EXCLUDE_DEFAULT,
@@ -3283,6 +3329,12 @@ function LibCard({ item, onRemove, onSetPublished }) {
           <AIProviderBadge provider={item.aiProvider} used={item.aiProviderUsed} />
         </div>
         <div className="card-headR">
+          {item.type === 'album' && item.status && (
+            <span className={'status status-readonly s-' + String(item.status).toLowerCase()}
+              title="Album 状态仅可在 Album 栏人工修改；此处为 GitHub 曲库同步结果">
+              <span className="status-dot" />{T('st' + item.status)}
+            </span>
+          )}
           <button type="button" className="icon-btn" title="从曲库移除"
             onClick={() => { if (window.confirm('确认从曲库移除「' + item.title + '」？')) onRemove(item.id); }}>×</button>
         </div>
@@ -3575,7 +3627,7 @@ function SongCard({ song, onStatus, onDelete, onPin, onRemix, onStar, onReviewSu
           {song.lineage && <span className="card-lineage">{song.lineage}</span>}
         </div>
         <div className="card-headR">
-          <Tooltip text="点击循环切换状态：草稿 → 已采用 → 排队中 → 已发布">
+          <Tooltip text="点击循环切换状态：草稿 → 已采用 → 排队中 → 已发布 → 舍弃 ❌">
             <button type="button" className={'status s-' + status.toLowerCase()} onClick={cycle}
               aria-label={'Status: ' + status + ', click to cycle'}>
               <span className="status-dot" />{T('st' + status)}
@@ -3865,17 +3917,20 @@ function albumTrackReviewSubject(album, tr, index) {
 function AlbumPromptReviewPanel({ album, onSubmitAll, onCopyAll, onApplyAll }) {
   const [reviewJson, setReviewJson] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
+  const [submitProgress, setSubmitProgress] = React.useState(null);
   const [applying, setApplying] = React.useState(false);
   const tracks = album?.data?.tracks || [];
   const submittedCount = tracks.filter(track => !!track.promptReview).length;
   const allSubmitted = tracks.length > 0 && submittedCount === tracks.length;
+  const canCopyAudit = tracks.length > 0 && submittedCount > 0;
   const statusLabel = submittedCount === 0
     ? '尚未提交'
     : allSubmitted ? '待 ChatGPT 审核' : `已提交 ${submittedCount}/${tracks.length} 首`;
   const submit = async () => {
     setSubmitting(true);
+    setSubmitProgress({ submitted: submittedCount, processed: submittedCount, total: tracks.length, failed: 0 });
     try {
-      await onSubmitAll(album.id);
+      await onSubmitAll(album.id, { onProgress: setSubmitProgress });
     } finally {
       setSubmitting(false);
     }
@@ -3901,15 +3956,23 @@ function AlbumPromptReviewPanel({ album, onSubmitAll, onCopyAll, onApplyAll }) {
             <span className="settings-note" style={{margin:'0 4px 0 0'}}>✓ 已一键提交 {submittedCount}/{tracks.length} 首</span>
           ) : (
             <button className="settings-save-btn" onClick={submit} disabled={submitting || !tracks.length}>
-              {submitting ? '正在提交整张专辑…' : (submittedCount ? `继续提交剩余 ${tracks.length - submittedCount} 首` : `一键提交 ${tracks.length} 首至 ChatGPT 审核`)}
+              {submitting
+                ? `正在提交 ${submitProgress?.submitted ?? submittedCount}/${submitProgress?.total ?? tracks.length} 首…`
+                : (submittedCount ? `继续提交剩余 ${tracks.length - submittedCount} 首` : `一键提交 ${tracks.length} 首至 ChatGPT 审核`)}
             </button>
           )}
-          {allSubmitted && <button className="settings-clear-btn" onClick={() => onCopyAll(album.id)}>复制整张专辑 ChatGPT 审核指令</button>}
+          {canCopyAudit && <button className="settings-clear-btn" onClick={() => onCopyAll(album.id)} disabled={submitting}>
+            复制整张专辑 ChatGPT 审核指令
+          </button>}
         </div>
+        {submitting && submitProgress && <div className="settings-note" style={{marginTop:10}}>
+          已处理 {submitProgress.processed}/{submitProgress.total} 首，已成功提交 {submitProgress.submitted}/{submitProgress.total} 首
+          {submitProgress.failed ? `，失败 ${submitProgress.failed} 首` : ''}。
+        </div>}
         {!allSubmitted && submittedCount > 0 && <div className="settings-note" style={{marginTop:10}}>
           仍有 {tracks.length - submittedCount} 首尚未提交；再次点击即可补齐，不会重置已经提交的曲目。
         </div>}
-        {allSubmitted && <div className="block" style={{marginTop:12}}>
+        {canCopyAudit && <div className="block" style={{marginTop:12}}>
           <div className="block-head">
             <div className="block-labels">
               <span className="block-label">导入整张专辑的 ChatGPT 审核 JSON</span>
@@ -3919,8 +3982,12 @@ function AlbumPromptReviewPanel({ album, onSubmitAll, onCopyAll, onApplyAll }) {
           <textarea className="settings-input" value={reviewJson}
             placeholder='粘贴整张专辑的 ChatGPT 审核结果：{"reviews":[{...},{...}]}'
             onChange={e => setReviewJson(e.target.value)} style={{minHeight:180, resize:'vertical'}} />
+          {!allSubmitted && <div className="settings-note" style={{marginTop:8}}>
+            已提供粘贴入口。请等待全部 {tracks.length} 首提交完成后再点击应用；未完成时会保留你已粘贴的内容，不会丢失。
+          </div>}
           <div className="settings-actions">
-            <button className="settings-save-btn" onClick={apply} disabled={!reviewJson.trim() || applying}>
+            <button className="settings-save-btn" onClick={apply} disabled={!allSubmitted || !reviewJson.trim() || applying}
+              title={allSubmitted ? '' : `需先完成 ${tracks.length} 首初稿提交，才能应用整张专辑审核结果`}>
               {applying ? '正在应用整张专辑审核…' : '应用整张专辑审核并推送'}
             </button>
           </div>
@@ -4239,7 +4306,7 @@ ${group.tracks.length ? group.tracks.map(({ track: tr, index: i }) => {
                   {showAlbumPrompts ? (zh ? '收起曲目 Prompt' : 'Hide track prompts') : (zh ? `展开 ${data.tracks.length} 首曲目 Prompt` : `Show ${data.tracks.length} track prompts`)}
                 </button>
               )}
-              <Tooltip text="点击循环切换：草稿 → 已采用 → 排队中 → 已发布">
+              <Tooltip text="点击循环切换：草稿 → 已采用 → 排队中 → 已发布 → 舍弃 ❌">
                 <button type="button" className={'status s-' + status.toLowerCase()} onClick={cycle}
                   aria-label={'Album status: ' + status + ', click to cycle'}>
                   <span className="status-dot" />{T('st' + status)}
@@ -4923,7 +4990,12 @@ function loadState() {
   for (const key of [STORE_KEY, STORE_BACKUP_KEY]) {
     try {
       const value = localStorage.getItem(key);
-      if (value) return JSON.parse(value);
+      if (value) {
+        const parsed = JSON.parse(value);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
+            parsed.songs && !Array.isArray(parsed.songs) || parsed.albums && !Array.isArray(parsed.albums)) continue;
+        return parsed;
+      }
     } catch (e) {}
   }
   return null;
@@ -5238,6 +5310,7 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
   const [reviewRepoVal, setReviewRepoVal] = React.useState(PROMPT_REVIEW_REPO_DEFAULT);
   const [reviewPatVal, setReviewPatVal] = React.useState('');
   const [reviewError, setReviewError] = React.useState('');
+  const [writeTestState, setWriteTestState] = React.useState({ busy: false, message: '' });
   const [sunoRoute, setSunoRoute] = React.useState(SUNO_RECIPE_DEFAULTS.lyricsRoute);
   const [sunoWeirdness, setSunoWeirdness] = React.useState(SUNO_RECIPE_DEFAULTS.weirdness);
   const [sunoStyleInfluence, setSunoStyleInfluence] = React.useState(SUNO_RECIPE_DEFAULTS.styleInfluence);
@@ -5337,6 +5410,24 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
     if (v) localStorage.setItem('prompt_review_github_pat', v);
     localStorage.setItem('prompt_review_github_repo', repo);
     setReviewRepoVal(repo); setReviewPatVal(''); setReviewError('');
+  }
+  async function verifyBrowserGitHubWrites() {
+    const token = currentPat;
+    const reviewToken = currentReviewPat || currentPat;
+    if (!token || !reviewToken) {
+      setWriteTestState({ busy: false, message: '当前浏览器缺少曲库或审核仓库 PAT。' });
+      return;
+    }
+    setWriteTestState({ busy: true, message: '正在测试两个仓库的隔离分支写入与回读…' });
+    try {
+      const branch = 'codex-reliability-audit-20260905';
+      const results = [];
+      results.push(await window.AwenReliability.verifyGitHubWrite(fetch, currentRepo, token, { branch }));
+      results.push(await window.AwenReliability.verifyGitHubWrite(fetch, currentReviewRepo, reviewToken, { branch }));
+      setWriteTestState({ busy: false, message: `真实写入与回读已确认：${results.map(result => `${result.repo}:${result.branch}/${result.path}`).join('；')}` });
+    } catch (error) {
+      setWriteTestState({ busy: false, message: `真实写入未确认：${error.message || error}` });
+    }
   }
   function saveSuno() {
     const clean = saveSunoDefaults({
@@ -5452,12 +5543,17 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
                 <input className="settings-input" value={repoVal} placeholder="owner/repo"
                   onChange={e => { setRepoVal(e.target.value); setPatError(''); }} />
               </label>
-              {currentPat && <span className="settings-stored">已存储: ···{currentPat.slice(-6)}</span>}
+              {currentPat && <span className="settings-stored">PAT 已存储（内容不显示）</span>}
               <input className="settings-input" type="password" value={patVal}
                 placeholder="github_pat_xxxx..." onChange={e => setPatVal(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && savePat()} />
               {patError && <div className="settings-error">{patError}</div>}
               <button className="settings-save-btn" onClick={savePat} disabled={!normalizeGitHubRepo(repoVal)}>保存 GitHub 同步配置</button>
+              <button className="settings-save-btn" onClick={verifyBrowserGitHubWrites}
+                disabled={writeTestState.busy || !currentPat || !normalizeGitHubRepo(repoVal) || !normalizeGitHubRepo(reviewRepoVal)}>
+                {writeTestState.busy ? '正在验证…' : '验证两个仓库真实写入（隔离测试分支）'}
+              </button>
+              {writeTestState.message && <div className="settings-note" role="status">{writeTestState.message}</div>}
               <p className="settings-note">
                 当前目标：<b>{currentRepo}</b>。Fine-grained PAT 必须选中同一个 Resource owner 与仓库，
                 并授予 <b>Contents: Read and write</b>；组织仓库还可能需要管理员批准。<br/>
@@ -5475,7 +5571,7 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
                   onChange={e => { setReviewRepoVal(e.target.value); setReviewError(''); }} />
               </label>
               {currentReviewPat
-                ? <span className="settings-stored">审核专用 Key：已存储 ···{currentReviewPat.slice(-6)}</span>
+                ? <span className="settings-stored">审核专用 PAT 已存储（内容不显示）</span>
                 : currentPat
                   ? <span className="settings-hint">未填写审核专用 Key，将复用已存的收藏同步凭据。</span>
                   : <span className="settings-hint">请填写审核专用 Key，或先配置收藏同步凭据。</span>}
@@ -5524,7 +5620,10 @@ function App() {
   const A = window.AWEN;
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
 
-  const saved = React.useRef(loadState()).current;
+  // Repair legacy snapshots before the Album cards are initialized. This is
+  // needed for prior ChatGPT review results, which may have been saved before
+  // GitHub UTF-8 decoding was corrected.
+  const saved = React.useRef(repairUtf8MojibakeDeep(loadState())).current;
   const [mode, setMode] = React.useState(saved?.mode || 'scene');
   const [universes, setUniverses] = React.useState(() => A.loadUniverses());
   const [activeUniverseId, setActiveUniverseId] = React.useState(null);
@@ -5544,10 +5643,23 @@ function App() {
     if (window.__awen_resolveToken) window.__awen_resolveToken(v);
   }
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  // The library is the canonical collection for anything a user keeps.  The
+  // Album shelf is derived from its album records, with one deliberate
+  // exception: Album workflow status is owned by the local Album state and
+  // may be changed/pushed only by the manual status control.
   const [libItems, setLibItems] = React.useState([]);
   const [libSha, setLibSha] = React.useState(null);
   const [libLoading, setLibLoading] = React.useState(false);
   const [libError, setLibError] = React.useState(null);
+  const [saveNotice, setSaveNotice] = React.useState('本地曲库待检查');
+  const [workspaceError, setWorkspaceError] = React.useState('');
+  const [snapshotConflict, setSnapshotConflict] = React.useState('');
+  const libraryStoreRef = React.useRef(null);
+  const libraryRequestRef = React.useRef(0);
+  // Every write goes through one queue.  A batch album review can update many
+  // tracks at once; serialising those writes prevents later status snapshots
+  // from being rejected or overwritten by an earlier GitHub SHA.
+  const librarySyncQueueRef = React.useRef(Promise.resolve());
 
   // Listen for AI flow's request-token event
   React.useEffect(() => {
@@ -5571,6 +5683,11 @@ function App() {
     song.ai ? { ...song, ai: attachSongSunoRecipe(song.ai, sunoDefaults) } : song));
   const [albums, setAlbums] = React.useState(() => (saved?.albums || []).map(album =>
     album.data ? { ...album, data: attachAlbumSunoRecipes(album.data, sunoDefaults) } : album));
+  // Batch review submits many tracks before React has a chance to render. Keep
+  // an immediately-updated reference so every completed track merges into the
+  // latest Album snapshot rather than overwriting the previous track's review.
+  const albumsRef = React.useRef(albums);
+  React.useEffect(() => { albumsRef.current = albums; }, [albums]);
   const [axisKey, setAxisKey] = React.useState(saved?.axisKey || 'day');
   const [trackCount, setTrackCount] = React.useState(saved?.trackCount || 8);
   // V3 Scene-mode selections
@@ -5601,6 +5718,8 @@ function App() {
   // responsive; pagehide/hidden flush immediately so closing the tab cannot
   // discard the last generated album. The prior snapshot is retained for
   // recovery if a browser write is interrupted.
+  const workspaceStore = React.useRef(null);
+  if (!workspaceStore.current) workspaceStore.current = window.AwenReliability.createWorkspaceStore(localStorage, STORE_KEY);
   const _writeTimer = React.useRef(null);
   const _latestState = React.useRef(null);
   function snapshotState() {
@@ -5614,14 +5733,20 @@ function App() {
   function persistState(snapshot) {
     if (!snapshot) return;
     try {
-      const next = JSON.stringify(snapshot);
-      const previous = localStorage.getItem(STORE_KEY);
-      if (previous && previous !== next) localStorage.setItem(STORE_BACKUP_KEY, previous);
-      localStorage.setItem(STORE_KEY, next);
-    } catch (e) {}
+      const result = workspaceStore.current.save(snapshot);
+      setWorkspaceError(result?.backupUpdated === false
+        ? '工作区已保存；自动备份空间不足，已保留较早备份。建议立即导出备份。'
+        : '');
+      return true;
+    } catch (e) {
+      setWorkspaceError(`工作区本地保存失败：${e.message} 请导出备份，暂勿关闭页面。`);
+      return false;
+    }
   }
+
   React.useLayoutEffect(() => {
     _latestState.current = snapshotState();
+    persistState(_latestState.current);
   }, [mode, sel, locks, songs, albums, seq, albumSeq, songPubSeq, albumPubSeq, axisKey, trackCount, sceneKey, moodKey, purposeKey, lang]);
   React.useEffect(() => {
     if (_writeTimer.current) clearTimeout(_writeTimer.current);
@@ -5696,6 +5821,7 @@ function App() {
   }
   function hydrateLibraryItem(item) {
     if (!item || !item.id) return item;
+    item = repairUtf8MojibakeDeep(item);
     if (item.type === 'song' || item.sel) {
       let recipe = item.sunoRecipe;
       if (!recipe && item.sel) {
@@ -5711,7 +5837,14 @@ function App() {
     const recipes = Array.isArray(item.sunoRecipes)
       ? item.sunoRecipes.map(recipe => normalizeSunoRecipe(recipe, { workspace }))
       : [];
-    return { ...item, type: 'album', workspace, sunoRecipes: recipes };
+    const albumSnapshot = item.albumSnapshot?.data
+      ? {
+          ...item.albumSnapshot,
+          data: attachAlbumSunoRecipes(item.albumSnapshot.data, sunoDefaults),
+          coverAsset: item.albumSnapshot.coverAsset || item.coverAsset || null,
+        }
+      : null;
+    return { ...item, type: 'album', workspace, sunoRecipes: recipes, albumSnapshot };
   }
   function readLocalLibrary() {
     try {
@@ -5719,15 +5852,241 @@ function App() {
       return Array.isArray(parsed?.songs) ? parsed.songs.map(hydrateLibraryItem).filter(Boolean) : [];
     } catch (e) { return []; }
   }
-  function writeLocalLibrary(items) {
-    return safeLS.set(LOCAL_LIB_KEY, JSON.stringify({ version: 2, songs: items.map(hydrateLibraryItem) }));
+  function localLibrarySchemaVersion() {
+    try {
+      return Number(JSON.parse(safeLS.get(LOCAL_LIB_KEY) || 'null')?.version || 0);
+    } catch (e) { return 0; }
   }
-  function mergeLibraryItems(remoteItems, localItems) {
+  function writeLocalLibrary(items) {
+    try {
+      const store = getLibraryStore();
+      store.save(items.map(hydrateLibraryItem));
+      setSaveNotice(store.getBackupWarning()
+        ? `本地已保存 · ${store.getBackupWarning()} · GitHub 待同步`
+        : '本地已保存 · GitHub 待同步');
+      return true;
+    } catch (error) {
+      setSaveNotice(`本地保存未完成：${error.message}`);
+      pushToast(`本地保存未完成：${error.message}`, { kind: 'error', duration: 12000 });
+      return false;
+    }
+  }
+  function getLibraryStore() {
+    const repo = getGitHubRepo();
+    if (libraryStoreRef.current?.repo !== repo) {
+      libraryStoreRef.current = { repo, store: window.AwenReliability.createStore(localStorage, LOCAL_LIB_KEY, repo) };
+    }
+    return libraryStoreRef.current.store;
+  }
+  function exportReliabilityBackup() {
+    const payload = { exportedAt: new Date().toISOString(), state: snapshotState(),
+      library: safeLS.get(LOCAL_LIB_KEY), previousLibrary: safeLS.get(LOCAL_LIB_KEY + '.backup'),
+      recovery: Object.fromEntries(Object.keys(localStorage).filter(key =>
+        key.startsWith(STORE_KEY + '.') || key.startsWith(LOCAL_LIB_KEY + '.writer.') || key.startsWith('awen_review_operation_v1.'))
+        .map(key => [key, localStorage.getItem(key)])) };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+    const a = document.createElement('a'); a.href = url; a.download = 'awen-local-recovery.json'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function mergeLibraryItems(remoteItems, localItems, preferLocal = true) {
     const merged = new Map();
-    [...(remoteItems || []), ...(localItems || [])].forEach(item => {
+    const ordered = preferLocal
+      ? [...(remoteItems || []), ...(localItems || [])]
+      : [...(localItems || []), ...(remoteItems || [])];
+    ordered.forEach(item => {
       if (item?.id) merged.set(item.id, item);
     });
     return [...merged.values()].sort((a, b) => String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
+  }
+
+  const ALBUM_STATUS_LABELS = { Draft: '草稿', Approved: '已采用', Queued: '排队中', Published: '已发布', Discarded: '舍弃 ❌' };
+  function localAlbumStatusMap(localItems = [], localAlbums = []) {
+    const statuses = new Map();
+    (localItems || []).forEach(item => {
+      if (item?.type === 'album' && item.id && item.status) statuses.set(item.id, item.status);
+    });
+    // The in-memory Album shelf is authoritative.  It intentionally wins over
+    // the cached library entry because only the manual Album status control
+    // may change this field.
+    (localAlbums || []).forEach(album => {
+      if (album?.id && album.status) statuses.set(album.id, album.status);
+    });
+    return statuses;
+  }
+  function applyLocalAlbumStatuses(items, statuses) {
+    if (!statuses?.size) return items;
+    return (items || []).map(item => {
+      if (!item || item.type !== 'album' || !statuses.has(item.id)) return item;
+      const status = statuses.get(item.id);
+      const workflow = item.workflow
+        ? { ...item.workflow, albumStatus: status, albumStatusLabel: ALBUM_STATUS_LABELS[status] || status }
+        : item.workflow;
+      const albumSnapshot = item.albumSnapshot
+        ? { ...item.albumSnapshot, status }
+        : item.albumSnapshot;
+      return { ...item, status, workflow, albumSnapshot };
+    });
+  }
+  function protectRemoteAlbumStatus(localItem, remoteItem) {
+    if (!localItem || localItem.type !== 'album' || !remoteItem) return localItem;
+    // For non-manual writes, keep the remote status bytes untouched.  The
+    // local Album remains the UI source of truth; this prevents cover uploads,
+    // review updates, pinning, or background sync from changing the cloud
+    // status.  An explicit manual status write opts out of this guard.
+    const next = { ...localItem };
+    if (Object.prototype.hasOwnProperty.call(remoteItem, 'status')) next.status = remoteItem.status;
+    if (remoteItem.workflow || localItem.workflow) {
+      next.workflow = {
+        ...(localItem.workflow || {}),
+        albumStatus: remoteItem.workflow?.albumStatus || remoteItem.status || localItem.workflow?.albumStatus,
+        albumStatusLabel: remoteItem.workflow?.albumStatusLabel || ALBUM_STATUS_LABELS[remoteItem.status] || localItem.workflow?.albumStatusLabel,
+        statusUpdatedAt: remoteItem.workflow?.statusUpdatedAt || localItem.workflow?.statusUpdatedAt,
+      };
+    }
+    if (localItem.albumSnapshot) {
+      next.albumSnapshot = {
+        ...localItem.albumSnapshot,
+        status: remoteItem.albumSnapshot?.status || remoteItem.status || localItem.albumSnapshot.status,
+      };
+    }
+    return next;
+  }
+
+  function libraryAlbumSnapshot(album) {
+    if (!album?.data) return null;
+    return {
+      ...album,
+      generating: false,
+      starred: true,
+      coverAsset: libraryCoverAsset(album.coverAsset),
+      data: attachAlbumSunoRecipes(album.data, sunoDefaults),
+    };
+  }
+  function albumLibraryEntry(album, previous = {}, { statusWrite = false } = {}) {
+    const ai = album?.data || {};
+    const workspace = ai.workspace || `Awen · ${ai.album || album?.id || 'Untitled Album'}`;
+    const snapshot = libraryAlbumSnapshot({ ...album, starred: true });
+    const albumStatus = album.status || previous.status || 'Draft';
+    const reviewStates = (ai.tracks || []).map((track, index) => ({
+      track: index + 1,
+      promptId: albumTrackPromptId(album.id, index),
+      status: track?.promptReview?.status || 'not_submitted',
+      reviewRound: track?.promptReview?.reviewRound || 0,
+      adopted: !!track?.promptReview?.adoptedRevision,
+      appliedToSuno: track?.promptReview?.status === 'applied_to_suno',
+    }));
+    return {
+      ...previous,
+      id: album.id,
+      type: 'album',
+      title: ai.album || previous.title || album.id,
+      tagline: ai.concept || ai.description || previous.tagline || album.axisLabel || '',
+      axisLabel: album.axisLabel || previous.axisLabel || '',
+      base: album.base || previous.base || {},
+      status: albumStatus,
+      pinned: !!album.pinned,
+      workspace,
+      aiProvider: album.aiProvider || previous.aiProvider || null,
+      aiProviderUsed: album.aiProviderUsed !== false,
+      genTime: album.genTime || previous.genTime || null,
+      createdAt: album.createdAt || previous.createdAt || null,
+      savedAt: previous.savedAt || new Date().toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
+      publishedAt: previous.publishedAt || album.publishedAt || null,
+      workflow: {
+        ...(previous.workflow || {}),
+        albumStatus,
+        albumStatusLabel: ALBUM_STATUS_LABELS[albumStatus] || albumStatus,
+        // A timestamp is status metadata too.  Keep it byte-for-byte stable
+        // for background saves; only the manual status control may refresh it.
+        statusUpdatedAt: statusWrite
+          ? new Date().toISOString()
+          : (previous.workflow?.statusUpdatedAt || null),
+        tracks: reviewStates,
+      },
+      coverAsset: libraryCoverAsset(album.coverAsset) || previous.coverAsset || null,
+      sunoRecipes: (ai.tracks || []).map(track => normalizeSunoRecipe(track.sunoRecipe, {
+        lyrics: track.lyrics,
+        style: track.style || ai.anchor,
+        exclude: track.exclude,
+        title: track.title,
+        workspace,
+      })),
+      albumSnapshot: snapshot,
+    };
+  }
+  function albumFromLibraryEntry(item) {
+    const snapshot = item?.albumSnapshot;
+    if (snapshot?.data) {
+      return {
+        ...snapshot,
+        id: item.id,
+        axisLabel: item.axisLabel || snapshot.axisLabel,
+        base: item.base || snapshot.base || {},
+        status: item.status || snapshot.status || 'Draft',
+        pinned: !!item.pinned,
+        starred: true,
+        aiProvider: item.aiProvider || snapshot.aiProvider || null,
+        aiProviderUsed: item.aiProviderUsed !== false,
+        genTime: item.genTime || snapshot.genTime || null,
+        createdAt: item.createdAt || snapshot.createdAt || null,
+        coverAsset: snapshot.coverAsset || item.coverAsset || null,
+        data: attachAlbumSunoRecipes(snapshot.data, sunoDefaults),
+      };
+    }
+    // Version 1/2 entries did not keep a full AlbumCard snapshot.  Preserve
+    // them by rebuilding the minimum complete card from their Suno recipes.
+    const workspace = item.workspace || `Awen · ${item.title || item.id}`;
+    const tracks = (item.sunoRecipes || []).map((recipe, index) => {
+      const normalized = normalizeSunoRecipe(recipe, { workspace, title: recipe?.title || `Track ${index + 1}` });
+      return {
+        title: normalized.title,
+        role: 'Saved library track',
+        scene: '',
+        prompt: normalized.style,
+        lyrics: normalized.structurePrompt || normalized.lyricsSkeleton || '',
+        style: normalized.style,
+        exclude: normalized.exclude,
+        sunoRecipe: normalized,
+      };
+    });
+    return {
+      id: item.id,
+      axisLabel: item.axisLabel || '曲库专辑',
+      base: item.base || {},
+      status: item.status || 'Draft',
+      pinned: !!item.pinned,
+      starred: true,
+      aiProvider: item.aiProvider || null,
+      aiProviderUsed: item.aiProviderUsed !== false,
+      genTime: item.genTime || null,
+      createdAt: item.createdAt || null,
+      coverAsset: item.coverAsset || null,
+      data: {
+        album: item.title || item.id,
+        concept: item.tagline || '',
+        description: item.tagline || '',
+        workspace,
+        anchor: tracks[0]?.style || '',
+        tracks,
+      },
+    };
+  }
+  function setCanonicalLibraryItems(items, { syncAlbumShelf = true, localAlbumStatuses = null, persist = true } = {}) {
+    let normalized = applyLocalAlbumStatuses((items || []).map(hydrateLibraryItem).filter(Boolean),
+      localAlbumStatuses || localAlbumStatusMap(readLocalLibrary(), albumsRef.current));
+    if (persist) {
+      if (!writeLocalLibrary(normalized)) return null;
+      normalized = readLocalLibrary();
+    }
+    setLibItems(normalized);
+    if (syncAlbumShelf) {
+      const inFlight = (albumsRef.current || []).filter(album => album?.generating);
+      const next = normalized.filter(item => item.type === 'album').map(albumFromLibraryEntry);
+      const ids = new Set(next.map(album => album.id));
+      albumsRef.current = [...inFlight.filter(album => !ids.has(album.id)), ...next];
+      setAlbums(albumsRef.current);
+    }
+    return normalized;
   }
   function githubSyncMessage(error) {
     const repo = getGitHubRepo();
@@ -5736,52 +6095,174 @@ function App() {
     }
     return error?.message || 'GitHub 同步失败';
   }
-  async function ghFetch(method, url, body, token) {
+  const GITHUB_NETWORK_RETRIES = 2;
+  function githubNetworkError(error) {
+    if (error?.name === 'AbortError') {
+      const timeoutError = new Error('GitHub 请求超时，请检查网络后再次点击补齐未提交曲目。');
+      timeoutError.code = 'GITHUB_REQUEST_TIMEOUT';
+      return timeoutError;
+    }
+    const message = String(error?.message || error || '');
+    if (/failed to fetch|networkerror|load failed|ssl|network request failed|unexpected end of json|invalid json|incomplete.*json|不完整.*json/i.test(message)) {
+      const networkError = new Error('无法连接 api.github.com（网络或代理连接失败）。当前内容已保存在本机；请确认代理已连接后重试。');
+      networkError.code = 'GITHUB_NETWORK_UNAVAILABLE';
+      return networkError;
+    }
+    return error;
+  }
+  async function ghFetch(method, url, body, token, options = {}) {
     const pat = token || safeLS.get('github_pat');
     if (!pat) throw new Error('需要 GitHub PAT');
-    const res = await fetch(url, {
-      method,
-      headers: { Authorization: `Bearer ${pat}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(body ? { 'Content-Type': 'application/json' } : {}) },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
-    if (!res.ok) {
-      const raw = await res.text();
-      let detail = '';
-      try { detail = JSON.parse(raw)?.message || ''; } catch (e) {}
-      const error = new Error(`GitHub ${res.status}: ${detail || '请求失败'}`);
-      error.status = res.status;
-      throw error;
-    }
-    return res.json();
+    return window.AwenReliability.githubJSON(fetch, method, url, body, pat, options);
+  }
+  async function readRemoteLibrary(repo = getGitHubRepo(), token = safeLS.get('github_pat')) {
+    const remote = await window.AwenReliability.readContent(fetch,
+      `https://api.github.com/repos/${repo}/contents/${GH_LIB_PATH}?ref=main`, token);
+    let parsed;
+    try { parsed = JSON.parse(remote.text); } catch { throw new Error('远端曲库正文不是有效 JSON；已停止覆盖，请导出本地备份。'); }
+    if (!Array.isArray(parsed.songs)) throw new Error('远端曲库缺少 songs 数组，已停止同步。');
+    return { sha: remote.sha, items: parsed.songs };
+  }
+  function refreshSyncNotice(record) {
+    setSaveNotice(record.sync.conflicts?.length
+      ? `本地已保留 · ${record.sync.conflicts.length} 项版本冲突待核对（请导出备份）`
+      : record.sync.pending ? '本地已保存 · GitHub 待同步'
+      : '本地已保存 · 当前曲库版本已获 GitHub 确认');
   }
   async function loadLibrary() {
+    const request = ++libraryRequestRef.current;
     setLibLoading(true); setLibError(null);
-    const localItems = readLocalLibrary();
-    setLibItems(localItems);
-    if (!safeLS.get('github_pat')) { setLibLoading(false); return; }
     try {
-      const data = await ghFetch('GET', `https://api.github.com/repos/${getGitHubRepo()}/contents/${GH_LIB_PATH}`);
-      const parsed = JSON.parse(atob(data.content.replace(/\n/g, '')));
-      const merged = mergeLibraryItems((parsed.songs || []).map(hydrateLibraryItem), localItems);
-      setLibItems(merged); writeLocalLibrary(merged); setLibSha(data.sha);
+      const store = getLibraryStore();
+      let disk = store.read();
+      // Recover browser-only completed albums regardless of the old schema
+      // marker; existing IDs are never replaced by a shelf snapshot.
+      const ids = new Set(disk.songs.map(item => item.id));
+      const recovered = (albumsRef.current || []).filter(a => a.data && !a.generating && !ids.has(a.id))
+        .map(a => albumLibraryEntry(a));
+      if (recovered.length && !disk.sync.base) disk = store.save([...disk.songs, ...recovered]);
+      const unmatched = (albumsRef.current || []).filter(album => album.localRevision &&
+        disk.songs.some(item => item.id === album.id && item.albumSnapshot?.localRevision !== album.localRevision));
+      setCanonicalLibraryItems(disk.songs, { persist: false, syncAlbumShelf: !unmatched.length });
+      refreshSyncNotice(disk);
+      if (unmatched.length) {
+        setSnapshotConflict('工作区与收藏快照版本不同，已保留工作区成果；请导出双方核对后重新收藏。');
+        return;
+      }
+      if (!safeLS.get('github_pat')) return;
+      const remote = await readRemoteLibrary();
+      if (request !== libraryRequestRef.current) return;
+      // Re-read inside reconcile after the await; no old local snapshot wins.
+      disk = store.reconcile(remote.items, { repo: getGitHubRepo(), path: GH_LIB_PATH, sha: remote.sha });
+      setCanonicalLibraryItems(disk.songs, { persist: false });
+      setLibSha(remote.sha);
+      refreshSyncNotice(disk);
     } catch (e) {
-      if (e.status === 404) { setLibItems(localItems); setLibSha(null); }
-      else { setLibItems(localItems); setLibError(`GitHub 同步失败，当前显示本地收藏。${githubSyncMessage(e)}`); }
-    }
-    setLibLoading(false);
+      setLibError(`读取未完成：${githubSyncMessage(e)}。本地内容保持可用。`);
+    } finally { if (request === libraryRequestRef.current) setLibLoading(false); }
   }
-  async function _writeLibrary(items, sha) {
-    const json = JSON.stringify({ version: 2, songs: items.map(hydrateLibraryItem) }, null, 2);
-    const content = btoa(unescape(encodeURIComponent(json)));
-    const res = await ghFetch('PUT', `https://api.github.com/repos/${getGitHubRepo()}/contents/${GH_LIB_PATH}`,
-      { message: `update library (${items.length} items)`, content, ...(sha ? { sha } : {}) });
-    setLibSha(res.content.sha);
+  async function _writeLibrary(items, sha, repo = getGitHubRepo(), token = safeLS.get('github_pat')) {
+    const content = toBase64Utf8(JSON.stringify({ version: 3, songs: items }, null, 2));
+    const res = await ghFetch('PUT', `https://api.github.com/repos/${repo}/contents/${GH_LIB_PATH}`,
+      { message: `update library (${items.length} items)`, branch: 'main', content, ...(sha ? { sha } : {}) }, token);
+    if (!res?.content?.sha) throw new Error('GitHub 尚未返回文件确认信息；请重试核对。');
+    return res.content.sha;
+  }
+  function syncCanonicalLibraryToGitHub({ silent = false, successMessage = '', statusWriteIds = [] } = {}) {
+    const store = getLibraryStore();
+    const repo = getGitHubRepo(), token = safeLS.get('github_pat');
+    if (statusWriteIds.length) {
+      try { store.save(store.read().songs, statusWriteIds); }
+      catch (e) { setSaveNotice(e.message); return Promise.resolve(false); }
+    }
+    if (!safeLS.get('github_pat')) return Promise.resolve(false);
+    const run = async () => {
+      let lastError;
+      setSaveNotice('本地已保存 · 正在核对 GitHub');
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          let remote = { items: [], sha: null };
+          try { remote = await readRemoteLibrary(repo, token); }
+          catch (e) { if (e.status !== 404) throw e; }
+          const disk = store.reconcile(remote.items, { repo, path: GH_LIB_PATH, sha: remote.sha });
+          if (disk.sync.conflicts?.length) {
+            setCanonicalLibraryItems(disk.songs, { persist: false });
+            refreshSyncNotice(disk);
+            return false;
+          }
+          const allowed = new Set(disk.sync.statusIds || []);
+          const remoteMap = new Map(remote.items.map(item => [item.id, item]));
+          const outgoing = disk.songs.map(item => item.type === 'album' && remoteMap.has(item.id) && !allowed.has(item.id)
+            ? protectRemoteAlbumStatus(item, remoteMap.get(item.id)) : item);
+          // Lost PUT response: if the subsequent read has the same bytes,
+          // acknowledge it without creating another commit.
+          const sha = window.AwenReliability.equal(outgoing, remote.items)
+            ? remote.sha : await _writeLibrary(outgoing, remote.sha, repo, token);
+          const confirmed = store.acknowledge(outgoing, sha);
+          setLibSha(sha);
+          setLibError(null);
+          refreshSyncNotice(confirmed);
+          // Do not setCanonicalLibraryItems(oldOutgoing): edits made while
+          // PUT was in flight stay intact, including local Album statuses.
+          if (!silent && successMessage) pushToast(confirmed.sync.pending
+            ? '本次远端写入已确认；本地还有较新修改待同步。' : successMessage);
+          return !confirmed.sync.pending;
+        } catch (error) {
+          lastError = error;
+          if ([401, 403, 404, 422].includes(error.status)) break;
+        }
+      }
+      try { store.failure(); } catch {}
+      const message = `GitHub 未确认同步；本地已保存内容保留。${githubSyncMessage(lastError)}`;
+      setLibError(message); setSaveNotice(message);
+      if (!silent) pushToast(message, { kind: 'warn', duration: 10000 });
+      return false;
+    };
+    const queued = librarySyncQueueRef.current.then(run, run);
+    librarySyncQueueRef.current = queued.catch(() => {});
+    return queued;
   }
   function libraryCoverAsset(asset) {
     if (!asset?.path) return null;
     const { previewDataUrl, ...stored } = asset;
     return stored;
   }
+  async function persistCanonicalAlbum(album, { silent = false, successMessage = '', statusWrite = false } = {}) {
+    if (!album?.id || !album.data) return false;
+    const source = mergeLibraryItems([], readLocalLibrary());
+    const existing = source.find(item => item.id === album.id) || {};
+    const entry = albumLibraryEntry({ ...album, starred: true }, existing, { statusWrite });
+    const localUpdated = source.some(item => item.id === album.id)
+      ? source.map(item => item.id === album.id ? entry : item)
+      : [entry, ...source];
+    if (!setCanonicalLibraryItems(localUpdated)) return false;
+    if (!safeLS.get('github_pat')) {
+      if (!silent) pushToast(
+        successMessage
+          ? `${successMessage.replace('已同步到 GitHub 曲库', '已保存到本机；请配置 GitHub PAT 以同步到其他设备')}`
+          : `⭐ 已收藏「${entry.title}」；请配置 GitHub PAT 以同步到其他设备。`,
+        { kind: 'warn', duration: 8000 }
+      );
+      return true;
+    }
+    const synced = await syncCanonicalLibraryToGitHub({
+      silent,
+      successMessage: successMessage || `⭐ 已收藏「${entry.title}」并推送到 GitHub`,
+      statusWriteIds: statusWrite ? [album.id] : [],
+    });
+    return synced;
+  }
+
+  // From now on the first render also pulls the cloud library.  The Album
+  // shelf no longer depends on the previous browser's awen_matrix_state_v1.
+  React.useEffect(() => { loadLibrary(); }, []);
+  React.useEffect(() => {
+    const changed = event => {
+      if (event.key === LOCAL_LIB_KEY) setSaveNotice('另一标签页更新了曲库；保存时将检查冲突，请先导出未保存内容。');
+    };
+    window.addEventListener('storage', changed);
+    return () => window.removeEventListener('storage', changed);
+  }, []);
   function readImageAsDataUrl(file) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -5865,41 +6346,28 @@ function App() {
         downloadUrl: response.content?.download_url || '',
         previewDataUrl,
       };
-      setAlbums(prev => prev.map(item => item.id === albumId ? { ...item, coverAsset } : item));
-
-      // If this album is already in the favourites library, keep its GitHub
-      // metadata pointed at the newly uploaded image without changing whether
-      // the user has starred the album.
-      if (album.starred) {
-        const storedAsset = libraryCoverAsset(coverAsset);
-        const localItems = readLocalLibrary();
-        const localUpdated = localItems.map(item => item.id === albumId ? { ...item, coverAsset: storedAsset } : item);
-        writeLocalLibrary(localUpdated);
-        setLibItems(prev => mergeLibraryItems(prev, localUpdated));
-        let remoteItems = [], currentLibrarySha = null;
-        try {
-          const remote = await ghFetch('GET', `https://api.github.com/repos/${repo}/contents/${GH_LIB_PATH}`);
-          const parsed = JSON.parse(atob(remote.content.replace(/\n/g, '')));
-          remoteItems = parsed.songs || [];
-          currentLibrarySha = remote.sha;
-        } catch (error) {
-          if (error.status !== 404) throw error;
-        }
-        const updated = mergeLibraryItems(remoteItems, localUpdated);
-        await _writeLibrary(updated, currentLibrarySha);
-        setLibItems(updated);
-        writeLocalLibrary(updated);
-      }
-      pushToast(`封面已上传并推送到 GitHub：${path}`);
-      return true;
+      const currentAlbum = (albumsRef.current || []).find(item => item.id === albumId);
+      if (!currentAlbum) throw new Error('封面文件已上传，但专辑已移除；未重新创建旧专辑。');
+      const updatedAlbum = { ...currentAlbum, coverAsset, starred: true };
+      setAlbums(prev => prev.map(item => item.id === albumId ? updatedAlbum : item));
+      // Album records now always live in the canonical library; saving the
+      // complete snapshot also preserves the cover when another device loads.
+      const synced = await persistCanonicalAlbum(updatedAlbum, { silent: true });
+      pushToast(synced ? `封面和曲库记录已同步：${path}` : `封面文件已上传；曲库记录尚未确认，请导出备份并重试曲库同步。`, { kind: synced ? 'info' : 'warn' });
+      return synced;
     } catch (error) {
       pushToast(`封面上传失败：${githubSyncMessage(error)}`, { kind: 'error', duration: 10000 });
       return false;
     }
   }
-  async function addToLibrary(item) {
+  async function addToLibrary(item, { silent = false } = {}) {
     const pat = safeLS.get('github_pat');
     const isSong = !!item.sel;
+    if (!isSong) {
+      const saved = await persistCanonicalAlbum({ ...item, starred: true }, { silent });
+      if (saved) setAlbums(prev => prev.map(album => album.id === item.id ? { ...album, starred: true } : album));
+      return saved;
+    }
     const ai = item.ai || item.data || {};
     const entry = {
       id: item.id, type: isSong ? 'song' : 'album',
@@ -5946,56 +6414,37 @@ function App() {
     setAlbums(prev => prev.map(a => a.id === item.id ? { ...a, starred: true } : a));
 
     if (!pat) {
-      pushToast(`⭐ 已在本机收藏「${entry.title}」；如需跨设备，可在设置中开启 GitHub 同步。`);
+      if (!silent) pushToast(`⭐ 已在本机收藏「${entry.title}」；如需跨设备，可在设置中开启 GitHub 同步。`);
       return;
     }
 
-    // Always read the latest SHA, then merge local and remote favourites.
-    let remoteItems = [], curSha = null;
-    try {
-      const data = await ghFetch('GET', `https://api.github.com/repos/${getGitHubRepo()}/contents/${GH_LIB_PATH}`);
-      const parsed = JSON.parse(atob(data.content.replace(/\n/g, '')));
-      remoteItems = parsed.songs || []; curSha = data.sha;
-    } catch (e) {
-      if (e.status !== 404) {
-        pushToast(`⭐ 已在本机收藏「${entry.title}」；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 });
-        return;
-      }
-    }
-    const updated = mergeLibraryItems(remoteItems, localUpdated);
-    try {
-      await _writeLibrary(updated, curSha);
-      setLibItems(updated);
-      writeLocalLibrary(updated);
-      pushToast(`⭐ 已收藏「${entry.title}」并推送到 GitHub`);
-    } catch (e) {
-      pushToast(`⭐ 已在本机收藏「${entry.title}」；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 });
-    }
+    // Reuse the queued writer so starring a song cannot accidentally rewrite
+    // an Album's status.  Non-manual writes preserve the remote status bytes;
+    // only setAlbumStatus passes an explicit statusWriteIds entry.
+    await syncCanonicalLibraryToGitHub({
+      silent,
+      successMessage: `⭐ 已收藏「${entry.title}」并推送到 GitHub`,
+    });
   }
   async function removeFromLibrary(id) {
     const updated = libItems.filter(x => x.id !== id);
-    writeLocalLibrary(updated);
-    setLibItems(updated);
+    setCanonicalLibraryItems(updated);
     setSongs(prev => prev.map(s => s.id === id ? { ...s, starred: false } : s));
-    setAlbums(prev => prev.map(a => a.id === id ? { ...a, starred: false } : a));
     if (!safeLS.get('github_pat')) { pushToast('已从本机曲库移除'); return; }
-    try {
-      await _writeLibrary(updated, libSha);
-      pushToast('已从本机与 GitHub 曲库移除');
-    } catch (e) { pushToast(`已从本机曲库移除；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 }); }
+    await syncCanonicalLibraryToGitHub({ successMessage: '已从本机与 GitHub 曲库移除' });
   }
   async function setPublishedAt(id, date) {
     const updated = libItems.map(x => x.id === id ? { ...x, publishedAt: date } : x);
-    writeLocalLibrary(updated); setLibItems(updated);
+    setCanonicalLibraryItems(updated);
     if (!safeLS.get('github_pat')) return;
-    try { await _writeLibrary(updated, libSha); }
-    catch (e) { pushToast(`发布日期已保存在本机；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 }); }
+    await syncCanonicalLibraryToGitHub({ successMessage: '发布日期已同步到 GitHub 曲库' });
   }
 
   // Prompt review sync is deliberately separate from the favourites library.
   // It stores versioned Markdown artifacts and a small manifest; no API keys,
   // cookies, or conversation transcripts are included in those artifacts.
   const REVIEW_MANIFEST_PATH = 'manifest.json';
+  const REVIEW_GITHUB_REQUEST_TIMEOUT_MS = 25000;
   function getPromptReviewRepo() {
     return normalizeGitHubRepo(safeLS.get('prompt_review_github_repo')) || PROMPT_REVIEW_REPO_DEFAULT;
   }
@@ -6012,38 +6461,47 @@ function App() {
     }
     return error?.message || 'Prompt 审核同步失败';
   }
-  function reviewContentUrl(path) {
-    const repo = getPromptReviewRepo();
+  function reviewTarget() { return { repo: getPromptReviewRepo(), token: getPromptReviewToken() }; }
+  function reviewContentUrl(path, target = reviewTarget()) {
+    const repo = target.repo;
     if (!repo) throw new Error('请先在设置中配置 Prompt 审核仓库。');
     const safePath = String(path || '').split('/').map(encodeURIComponent).join('/');
     return `https://api.github.com/repos/${repo}/contents/${safePath}`;
   }
-  async function reviewGhFetch(method, path, body) {
-    const token = getPromptReviewToken();
+  async function reviewGhFetch(method, path, body, target = reviewTarget()) {
+    const token = target.token;
     if (!token) throw new Error('需要 GitHub PAT；请先配置收藏同步凭据或审核专用 PAT。');
-    return ghFetch(method, reviewContentUrl(path), body, token);
-  }
-  async function readReviewFile(path) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REVIEW_GITHUB_REQUEST_TIMEOUT_MS);
     try {
-      const data = await reviewGhFetch('GET', path);
-      return { sha: data.sha, text: fromBase64Utf8(data.content || '') };
+      return await ghFetch(method, reviewContentUrl(path, target), { ...body, branch: 'main' }, token, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  async function readReviewFile(path, target = reviewTarget()) {
+    try {
+      return await window.AwenReliability.readContent(fetch, reviewContentUrl(path, target) + '?ref=main', target.token);
     } catch (e) {
       if (e.status === 404) return null;
       throw e;
     }
   }
-  async function writeReviewFile(path, text, message, sha) {
+  async function writeReviewFile(path, text, message, sha, target = reviewTarget()) {
+    const existing = await readReviewFile(path, target);
+    if (existing?.text === text) return { content: { sha: existing.sha } };
+    if (existing && !sha) throw new Error('审核文件已存在不同内容；历史版本保留，请核对后重试。');
     return reviewGhFetch('PUT', path, {
       message,
       content: toBase64Utf8(text),
       ...(sha ? { sha } : {}),
-    });
+    }, target);
   }
   function isGitHubWriteConflict(error) {
     return error?.status === 409;
   }
-  async function readReviewManifest() {
-    const remote = await readReviewFile(REVIEW_MANIFEST_PATH);
+  async function readReviewManifest(target = reviewTarget()) {
+    const remote = await readReviewFile(REVIEW_MANIFEST_PATH, target);
     if (!remote) return { sha: null, manifest: { version: 1, updatedAt: null, prompts: [] } };
     try {
       const parsed = JSON.parse(remote.text);
@@ -6059,12 +6517,23 @@ function App() {
       throw new Error('审核仓库的 manifest.json 不是有效 JSON。');
     }
   }
-  async function upsertReviewManifest(review) {
+  function assertReviewManifestAdvance(previous, next) {
+    if (!previous) return;
+    if (Number(previous.reviewCount || 0) > Number(next.reviewCount || 0))
+      throw new Error('远端已有更新审核轮次；未覆盖，请导出恢复任务核对。');
+    if (Number(previous.reviewCount || 0) === Number(next.reviewCount || 0)) {
+      if (previous.status === 'applied_to_suno' && next.status !== previous.status ||
+          previous.status === 'approved' && !['approved', 'applied_to_suno'].includes(next.status) ||
+          previous.approvedFile && next.approvedFile !== previous.approvedFile)
+        throw new Error('远端审核版本已推进；拒绝回退审核状态。');
+    }
+  }
+  async function upsertReviewManifest(review, target = reviewTarget()) {
     // The manifest is shared by every song and album track. Two quick submits
     // can both read the same SHA; on GitHub's 409 we must re-read and merge
     // rather than retrying stale JSON (which could discard the other track).
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const remote = await readReviewManifest();
+      const remote = await readReviewManifest(target);
       const entry = {
         key: review.key,
         id: review.id,
@@ -6080,13 +6549,62 @@ function App() {
         updatedAt: new Date().toISOString(),
       };
       const index = remote.manifest.prompts.findIndex(item => item?.key === review.key);
+      assertReviewManifestAdvance(remote.manifest.prompts[index], entry);
       const prompts = index < 0
         ? [entry, ...remote.manifest.prompts]
         : remote.manifest.prompts.map((item, i) => i === index ? { ...item, ...entry } : item);
       const manifest = { version: 1, updatedAt: entry.updatedAt, prompts };
       try {
         await writeReviewFile(REVIEW_MANIFEST_PATH, JSON.stringify(manifest, null, 2) + '\n',
-          `review: update manifest for ${review.id}`, remote.sha);
+          `review: update manifest for ${review.id}`, remote.sha, target);
+        return;
+      } catch (error) {
+        if (!isGitHubWriteConflict(error) || attempt === 2) throw error;
+        await new Promise(resolve => setTimeout(resolve, 180 * (attempt + 1)));
+      }
+    }
+  }
+  function reviewManifestEntry(review) {
+    return {
+      key: review.key,
+      id: review.id,
+      title: review.title,
+      status: review.status,
+      sourceHash: review.sourceHash,
+      sourceFile: review.sourcePath,
+      latestReviewFile: review.latestReviewPath || null,
+      approvedFile: review.approvedPath || null,
+      applicationFile: review.applicationPath || null,
+      appliedAt: review.appliedAt || null,
+      reviewCount: review.reviewCount || 0,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+  async function upsertReviewManifestBatch(reviews, target = reviewTarget()) {
+    // Album submission writes every draft first, then performs one shared
+    // manifest update.  This avoids 16 serial manifest read/write pairs and
+    // keeps the one-click workflow both faster and conflict-safe.
+    const validReviews = (reviews || []).filter(review => review?.key && review?.id);
+    if (!validReviews.length) return;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const remote = await readReviewManifest(target);
+      const updatedAt = new Date().toISOString();
+      const entriesByKey = new Map(validReviews.map(review => [review.key, { ...reviewManifestEntry(review), updatedAt }]));
+      const existingKeys = new Set();
+      const updatedExisting = remote.manifest.prompts.map(item => {
+        const entry = entriesByKey.get(item?.key);
+        if (!entry) return item;
+        assertReviewManifestAdvance(item, entry);
+        existingKeys.add(entry.key);
+        return { ...item, ...entry };
+      });
+      const newEntries = validReviews
+        .map(review => entriesByKey.get(review.key))
+        .filter(entry => !existingKeys.has(entry.key));
+      const prompts = [...newEntries.reverse(), ...updatedExisting];
+      try {
+        await writeReviewFile(REVIEW_MANIFEST_PATH, JSON.stringify({ version: 1, updatedAt, prompts }, null, 2) + '\n',
+          `review: batch submit ${validReviews.length} prompts for ChatGPT audit`, remote.sha, target);
         return;
       } catch (error) {
         if (!isGitHubWriteConflict(error) || attempt === 2) throw error;
@@ -6107,9 +6625,9 @@ function App() {
   }
 
   function findPromptReviewSubject(subjectId) {
-    const song = songs.find(item => item.id === subjectId);
+    const song = (_latestState.current?.songs || songs).find(item => item.id === subjectId);
     if (song) return song;
-    for (const album of albums) {
+    for (const album of (albumsRef.current || albums)) {
       const tracks = album?.data?.tracks || [];
       const index = tracks.findIndex((track, i) => albumTrackPromptId(album.id, i) === subjectId);
       if (index >= 0) return albumTrackReviewSubject(album, tracks[index], index);
@@ -6117,30 +6635,30 @@ function App() {
     return null;
   }
 
-  function updatePromptReviewSubject(subjectId, review, approvedRecipe = null) {
-    setSongs(prev => prev.map(item => item.id === subjectId ? {
-      ...item,
-      ...(approvedRecipe ? {
-        ai: { ...item.ai, title: approvedRecipe.title, suno: { ...item.ai.suno, style: approvedRecipe.style, exclude: approvedRecipe.exclude, recipe: approvedRecipe } },
-      } : {}),
-      promptReview: review,
-    } : item));
-    setAlbums(prev => prev.map(album => {
-      const tracks = album?.data?.tracks || [];
-      const index = tracks.findIndex((track, i) => albumTrackPromptId(album.id, i) === subjectId);
-      if (index < 0) return album;
-      const nextTracks = tracks.map((track, i) => i !== index ? track : {
-        ...track,
-        ...(approvedRecipe ? {
-          title: approvedRecipe.title,
-          style: approvedRecipe.style,
-          exclude: approvedRecipe.exclude,
-          sunoRecipe: approvedRecipe,
-        } : {}),
-        promptReview: review,
-      });
-      return { ...album, data: { ...album.data, tracks: nextTracks } };
-    }));
+  function updatePromptReviewSubject(subjectId, review, approvedRecipe = null, { persist = true } = {}) {
+    const current = _latestState.current || snapshotState();
+    const nextSongs = current.songs.map(item => item.id !== subjectId ? item : {
+      ...item, promptReview: review,
+      ...(approvedRecipe ? { ai: { ...item.ai, title: approvedRecipe.title,
+        suno: { ...item.ai.suno, style: approvedRecipe.style, exclude: approvedRecipe.exclude, recipe: approvedRecipe } } } : {}),
+    });
+    let updatedAlbum;
+    const nextAlbums = (albumsRef.current || current.albums).map(album => {
+      if (!(album.data?.tracks || []).some((track, i) => albumTrackPromptId(album.id, i) === subjectId)) return album;
+      updatedAlbum = { ...album, localRevision: crypto.randomUUID(), starred: true, data: { ...album.data, tracks: album.data.tracks.map((track, i) =>
+        albumTrackPromptId(album.id, i) !== subjectId ? track : { ...track, promptReview: review,
+          ...(approvedRecipe ? { title: approvedRecipe.title, style: approvedRecipe.style,
+            exclude: approvedRecipe.exclude, sunoRecipe: approvedRecipe } : {}) }) } };
+      return updatedAlbum;
+    });
+    const next = { ...current, songs: nextSongs, albums: nextAlbums };
+    if (!persistState(next)) throw new Error('审核结果本地保存未完成；恢复任务仍保留，请导出备份。');
+    _latestState.current = next;
+    albumsRef.current = nextAlbums;
+    setSongs(nextSongs); setAlbums(nextAlbums);
+    // The workspace commit is durable before optional library/API work starts.
+    if (persist && updatedAlbum) void persistCanonicalAlbum(updatedAlbum, { silent: true });
+    return true;
   }
 
   function editReviewedPrompt(subjectId, patch) {
@@ -6166,7 +6684,7 @@ function App() {
       title: titleVal,
       manualEditedAt: new Date().toISOString(),
     };
-    const nextReview = { ...review, adoptedRevision: nextRevised, manualEditedAt: nextRevised.manualEditedAt };
+    let nextReview = { ...review, adoptedRevision: nextRevised, manualEditedAt: nextRevised.manualEditedAt };
     // Keep the working Suno recipe in sync so 配方折叠区、复制按钮与审核后面板一致。
     const currentRecipe = normalizeSunoRecipe(subject.ai.suno?.recipe, {
       lyrics: subject.ai.suno?.lyrics || subject.ai.suno?.structure,
@@ -6182,29 +6700,58 @@ function App() {
       exclude: nextRevised.exclude,
       title: nextRevised.title,
     };
-    updatePromptReviewSubject(subjectId, nextReview, approvedRecipe);
+    const draft = buildPromptReviewDraft({ ...subject, ai: { ...subject.ai, title: approvedRecipe.title,
+      suno: { ...subject.ai.suno, style: approvedRecipe.style, exclude: approvedRecipe.exclude, recipe: approvedRecipe } } });
+    nextReview = { ...nextReview, ...draft, status: 'needs_revision', approvedPath: null, applicationPath: null, appliedAt: null,
+      supersedes: { key: review.key, sourceHash: review.sourceHash, approvedFile: review.approvedPath || null } };
+    try { updatePromptReviewSubject(subjectId, nextReview, approvedRecipe); }
+    catch (error) { pushToast(error.message, { kind: 'error' }); return false; }
     pushToast('已保存手动修改（仅本机生效；GitHub 审核历史保持不变）。');
     return true;
   }
-  async function submitPromptReview(subjectId, options = {}) {
-    const silent = !!options.silent;
-    const subject = findPromptReviewSubject(subjectId);
-    if (!subject?.ai) {
-      if (!silent) pushToast('该曲目尚未生成完成，不能提交审核。', { kind: 'warn' });
-      return false;
-    }
-    if (!reviewRepoReady()) return false;
+  function nextPromptReviewForSubject(subject, options = {}) {
     const nextDraft = buildPromptReviewDraft(subject);
     const previous = subject.promptReview;
-    const review = previous?.sourceHash === nextDraft.sourceHash
+    return previous?.sourceHash === nextDraft.sourceHash
       ? { ...previous, status: 'in_review', submittedAt: previous.submittedAt || nextDraft.submittedAt, applicationPath: null, appliedAt: null, batchAlbumId: options.batchAlbumId || null }
       : { ...nextDraft, batchAlbumId: options.batchAlbumId || null };
+  }
+  function draftOperationId(review) { return getPromptReviewRepo() + ':draft:' + review.key; }
+  function finishDraftOperation(review) {
+    const op = reviewJournal.current.list().find(op => op.id === draftOperationId(review));
+    if (op) reviewJournal.current.finish(op);
+    refreshReviewPending();
+  }
+  async function writePromptReviewDraft(subjectId, options = {}) {
+    const subject = findPromptReviewSubject(subjectId);
+    if (!subject?.ai) throw new Error('该曲目尚未生成完成，不能提交审核。');
+    const draft = nextPromptReviewForSubject(subject, options);
+    const operation = reviewJournal.current.begin(draftOperationId(draft), {
+      kind: 'draft', repo: getPromptReviewRepo(), subject, review: draft,
+    });
+    refreshReviewPending();
+    const review = operation.payload.review;
+    const remote = await readReviewFile(review.sourcePath);
+    const text = renderReviewDraftMarkdown(review);
+    // Existing immutable drafts may differ only in their original submission
+    // timestamp. Compare all other bytes; never overwrite an existing draft.
+    const withoutTime = value => value.replace(/^submittedAt:.*$/m, 'submittedAt:');
+    if (remote && withoutTime(remote.text) === withoutTime(text)) {
+      return { ...review, submittedAt: remote.text.match(/^submittedAt: (.*)$/m)?.[1] || review.submittedAt };
+    }
+    await writeReviewFile(review.sourcePath, text, `review: submit ${review.id} for ChatGPT audit`);
+    return review;
+  }
+  async function submitPromptReview(subjectId, options = {}) {
+    const silent = !!options.silent;
+    if (!reviewRepoReady()) return false;
     try {
-      const remote = await readReviewFile(review.sourcePath);
-      await writeReviewFile(review.sourcePath, renderReviewDraftMarkdown(review),
-        `review: submit ${review.id} for ChatGPT audit`, remote?.sha);
+      const review = await writePromptReviewDraft(subjectId, options);
+      if (buildPromptReviewDraft(findPromptReviewSubject(subjectId)).sourceHash !== review.sourceHash)
+        throw new Error('提交期间 Prompt 已改变；已保留初稿任务，未覆盖当前编辑。');
       await upsertReviewManifest(review);
-      updatePromptReviewSubject(subjectId, review);
+      updatePromptReviewSubject(subjectId, review, null, { persist: !options.deferAlbumPersist });
+      finishDraftOperation(review);
       if (!silent) pushToast(`已将「${review.title}」提交到 Prompt 审核仓库。`);
       return true;
     } catch (e) {
@@ -6223,9 +6770,9 @@ function App() {
     pushToast(copied ? 'ChatGPT 审核指令已复制。' : '无法自动复制，请手动复制审核指令。');
   }
   function findAlbumForReview(albumId) {
-    return albums.find(album => album.id === albumId) || null;
+    return (albumsRef.current || albums).find(album => album.id === albumId) || null;
   }
-  async function submitAlbumPromptReviews(albumId) {
+  async function submitAlbumPromptReviews(albumId, { onProgress } = {}) {
     const album = findAlbumForReview(albumId);
     const tracks = album?.data?.tracks || [];
     if (!album || !tracks.length) {
@@ -6242,25 +6789,130 @@ function App() {
       pushToast('这张专辑的所有曲目都已经提交。请复制整张专辑审核指令。', { kind: 'info' });
       return true;
     }
-    const failed = [];
+    const alreadySubmitted = tracks.length - pendingIds.length;
+    const submittedReviews = [];
+    let unresolvedIds = pendingIds;
     let batchFirstError = null;
-    for (const id of pendingIds) {
-      const submitted = await submitPromptReview(id, {
-        silent: true,
-        batchAlbumId: album.id,
-        onBatchError: e => { if (!batchFirstError) batchFirstError = e; },
-      });
-      if (!submitted) failed.push(id);
+    const reportProgress = ({ round = 1, retrying = 0 } = {}) => {
+      if (typeof onProgress === 'function') {
+        const submitted = alreadySubmitted + submittedReviews.length;
+        onProgress({
+          submitted,
+          processed: submitted,
+          total: tracks.length,
+          failed: retrying,
+          retrying,
+          round,
+        });
+      }
+    };
+    reportProgress();
+    // Each draft lives in its own GitHub file, so a small bounded pool is
+    // safe and much faster than serially making 16 × (GET + PUT) requests.
+    // The shared manifest is still updated exactly once after this pool ends.
+    const submitRound = async (ids, round) => {
+      const failed = [];
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < ids.length) {
+          const id = ids[cursor++];
+          try {
+            const review = await writePromptReviewDraft(id, { batchAlbumId: album.id });
+            submittedReviews.push({ id, review });
+            reportProgress({ round, retrying: failed.length });
+          } catch (error) {
+            if (!batchFirstError) batchFirstError = error;
+            failed.push(id);
+            reportProgress({ round, retrying: failed.length });
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(3, ids.length) }, worker));
+      return failed;
+    };
+    for (let round = 1; unresolvedIds.length && round <= 3; round += 1) {
+      unresolvedIds = await submitRound(unresolvedIds, round);
+      if (unresolvedIds.length && round < 3) {
+        reportProgress({ round, retrying: unresolvedIds.length });
+        await new Promise(resolve => setTimeout(resolve, 400 * round));
+      }
     }
-    if (failed.length) {
+    if (submittedReviews.length) {
+      try {
+        await upsertReviewManifestBatch(submittedReviews.map(item => item.review));
+        submittedReviews.forEach(({ id, review }) => { updatePromptReviewSubject(id, review, null, { persist: false }); finishDraftOperation(review); });
+        const latestAlbum = findAlbumForReview(album.id);
+        if (latestAlbum) void persistCanonicalAlbum(latestAlbum, { silent: true });
+      } catch (error) {
+        const reason = promptReviewSyncMessage(error);
+        pushToast(`曲目初稿已写入，但审核清单同步失败（${reason}）。请再次点击自动修复，不需要重新生成。`, { kind: 'error', duration: 12000 });
+        return false;
+      }
+    }
+    if (unresolvedIds.length) {
       const reason = batchFirstError ? promptReviewSyncMessage(batchFirstError) : '原因未知';
-      pushToast(`整张专辑已提交 ${pendingIds.length - failed.length}/${pendingIds.length} 首；${failed.length} 首未成功（${reason}）。可再次点击补齐。`, { kind: 'error', duration: 12000 });
+      pushToast(`已在一次点击内自动重试 3 轮；仍有 ${unresolvedIds.length} 首未成功（${reason}）。再次点击只会补齐这些曲目。`, { kind: 'error', duration: 12000 });
       return false;
     }
     pushToast(`已一次提交「${album.data.album}」的 ${pendingIds.length} 首曲目。现在复制一条审核指令即可交给 ChatGPT。`);
     return true;
   }
+
+  async function restoreAlbumPromptReviewState(albumId) {
+    const album = findAlbumForReview(albumId);
+    const tracks = album?.data?.tracks || [];
+    if (!album || !tracks.length || tracks.every(track => !!track.promptReview)) return 0;
+    if (!getPromptReviewRepo() || !getPromptReviewToken()) return 0;
+    let remote;
+    try {
+      remote = await readReviewManifest();
+    } catch (error) {
+      // Copy remains deliberately offline-friendly.  If the manifest cannot
+      // be read, the caller will show the normal incomplete-submission hint.
+      return 0;
+    }
+    const byVersion = new Map((remote.manifest.prompts || []).filter(item => item?.id && item?.sourceHash)
+      .map(item => [item.id + ':' + item.sourceHash, item]));
+    const restoredById = new Map();
+    tracks.forEach((track, index) => {
+      if (track.promptReview) return;
+      const subject = albumTrackReviewSubject(album, track, index);
+      const draft = buildPromptReviewDraft(subject);
+      const entry = byVersion.get(subject.id + ':' + draft.sourceHash);
+      // A manifest entry is only safe to restore when it represents this exact
+      // recipe version.  A changed sourceHash must be submitted as a new draft.
+      if (!entry || entry.sourceHash !== draft.sourceHash) return;
+      restoredById.set(subject.id, {
+        ...draft,
+        key: entry.key || draft.key,
+        title: entry.title || draft.title,
+        status: entry.status || 'in_review',
+        sourceHash: entry.sourceHash,
+        sourcePath: entry.sourceFile || draft.sourcePath,
+        latestReviewPath: entry.latestReviewFile || null,
+        approvedPath: entry.approvedFile || null,
+        applicationPath: entry.applicationFile || null,
+        appliedAt: entry.appliedAt || null,
+        reviewCount: entry.reviewCount || 0,
+        submittedAt: entry.updatedAt || draft.submittedAt,
+        batchAlbumId: album.id,
+      });
+    });
+    if (!restoredById.size) return 0;
+    const nextTracks = tracks.map((track, index) => {
+      const id = albumTrackPromptId(album.id, index);
+      return restoredById.has(id) ? { ...track, promptReview: restoredById.get(id) } : track;
+    });
+    const updatedAlbum = { ...album, data: { ...album.data, tracks: nextTracks }, starred: true };
+    const currentAlbums = albumsRef.current || albums;
+    const nextAlbums = currentAlbums.map(candidate => candidate.id === album.id ? updatedAlbum : candidate);
+    albumsRef.current = nextAlbums;
+    setAlbums(nextAlbums);
+    void persistCanonicalAlbum(updatedAlbum, { silent: true });
+    return restoredById.size;
+  }
   async function copyAlbumPromptReviewInstruction(albumId) {
+    const restored = await restoreAlbumPromptReviewState(albumId);
     const album = findAlbumForReview(albumId);
     const tracks = album?.data?.tracks || [];
     const reviews = tracks.map((track, index) => ({
@@ -6269,7 +6921,7 @@ function App() {
       subject: albumTrackReviewSubject(album, track, index),
     }));
     if (!album || reviews.some(item => !item.review)) {
-      pushToast('请先完整提交整张专辑。', { kind: 'warn' });
+      pushToast('仍有曲目没有可确认的 GitHub 审核初稿；请点击“继续提交剩余曲目”后再复制。', { kind: 'warn', duration: 10000 });
       return;
     }
     // ChatGPT on the web often has no access to the user's private GitHub
@@ -6287,7 +6939,9 @@ function App() {
       : '';
     const instruction = `你是 Study With Me Suno Prompt 编辑。请审核下面完整、可独立使用的专辑审核包。不要访问 GitHub、不要要求仓库权限、不要假设任何外部文件；本消息已包含审核所需的全部真实曲目数据。\n\n# 审核目标\n专辑「${album.data.album}」共有 ${reviews.length} 首。逐首检查是否适合长时间学习，同时检查整张专辑的声音身份、动态和标题是否连贯。\n\n# 审核规则\n- Focus：低干扰、可持续专注。\n- Dynamic Stability：没有突发动态、Drop 或戏剧性高潮。\n- Vocal Safety：避免歌词、演唱、spoken word 和拟人化人声。\n- Warmth：felt piano、磁带饱和、室内混响等温暖质感是否自然。\n- Loopability：适合与其他 3–6 分钟片段柔和拼接。\n- 不得删除基础 Exclude：vocals, singing, spoken word, harsh percussion, sudden dynamics, crisp, polished。\n- 避免 dramatic climax、drop、clean、hi-fi、密集 hi-hat 与复杂鼓组。\n- 若 revised.lyricsRoute 为 instrumental，revised.structurePrompt 必须是空字符串。${rejectedTrackRule}\n# 待审核的实际 Suno 配方\n${sourceList}\n\n# 返回格式（严格执行）\n只返回有效 JSON，不要 Markdown 围栏、不要解释、不要 error 字段。顶层必须是：\n{"reviews":[...]}\n\nreviews 必须恰好包含 ${reviews.length} 个对象，顺序与上方曲目一致。每个对象必须具有且仅具有这些字段：\n{"id":"保持原值","sourceHash":"保持原值","decision":"approve | approve_with_changes | needs_revision | reject","scores":{"focus":0,"dynamicStability":0,"vocalSafety":0,"warmth":0,"loopability":0},"revised":{"lyricsRoute":"structure-prompt | instrumental","structurePrompt":"字符串；Instrumental 时为空","style":"非空字符串","exclude":"非空字符串且包含全部基础 Exclude","title":"1–160 字符的建议标题"},"changes":["最多 20 条"],"risks":["最多 20 条"],"summary":"可选，不超过 2000 字符"}\n\n不要修改任一 id 或 sourceHash；不要添加 reviewedAt、schemaVersion 或其他字段。`;
     const copied = await copyText(instruction);
-    pushToast(copied ? '已复制自包含审核包；直接粘贴到网页版 ChatGPT 即可，无需 GitHub 权限。' : '无法自动复制，请手动复制审核包。');
+    pushToast(copied
+      ? `已复制自包含审核包${restored ? `；已从 GitHub 恢复 ${restored} 首本地审核状态` : ''}，直接粘贴到网页版 ChatGPT 即可，无需 GitHub 权限。`
+      : '无法自动复制，请手动复制审核包。');
   }
   function promptReviewResultSignature(result) {
     // A review result can be pasted again after a partial GitHub failure. Keep
@@ -6332,7 +6986,7 @@ function App() {
     try {
       const stripped = String(rawJson || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
       const parsed = JSON.parse(stripped);
-      results = Array.isArray(parsed) ? parsed : parsed?.reviews;
+      results = repairUtf8MojibakeDeep(Array.isArray(parsed) ? parsed : parsed?.reviews);
       if (!Array.isArray(results)) throw new Error('需要 JSON 数组，或包含 reviews 数组的 JSON 对象。');
       if (results.length !== tracks.length) throw new Error(`需要恰好 ${tracks.length} 个曲目审核结果。`);
       const expected = new Map(tracks.map((track, index) => {
@@ -6386,11 +7040,77 @@ function App() {
     pushToast(`已应用「${album.data.album}」本次待处理的 ${pending.length} 首审核结果${skippedText}，并同步到 GitHub。`);
     return true;
   }
+  const reviewJournal = React.useRef(null);
+  if (!reviewJournal.current) reviewJournal.current = window.AwenReliability.createOperationJournal(localStorage, 'awen_review_operation_v1');
+  const [reviewPending, setReviewPending] = React.useState(() => {
+    try { return reviewJournal.current.list().filter(op => op.status !== 'complete').length; } catch { return -1; }
+  });
+  function refreshReviewPending() {
+    setReviewPending(reviewJournal.current.list().filter(op => op.status !== 'complete').length);
+  }
+  async function retryPendingReviews() {
+    for (const op of reviewJournal.current.list().filter(op => op.status !== 'complete')) {
+      if (op.payload.repo !== getPromptReviewRepo()) continue;
+      if (op.payload.kind === 'draft') {
+        const current = findPromptReviewSubject(op.payload.subject.id);
+        if (buildPromptReviewDraft(current).sourceHash !== op.payload.review.sourceHash) {
+          pushToast('未完成初稿与当前 Prompt 不同；已保留双方，请导出核对。', { kind: 'warn' });
+          continue;
+        }
+        await submitPromptReview(current.id);
+      } else if (['adopt', 'mark'].includes(op.payload.kind)) {
+        await runReviewAction(op.payload.kind, op.payload.subject.id, op);
+      } else await applyPromptReview(op.payload.subject.id, op.payload.rawJson, { operation: op });
+    }
+  }
   async function applyPromptReview(subjectId, rawJson, options = {}) {
+    try {
+      const subject = options.operation?.payload.subject || findPromptReviewSubject(subjectId);
+      if (!subject?.promptReview) throw new Error('请先提交该曲目的初稿。');
+      const stripped = String(rawJson || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+      const raw = repairUtf8MojibakeDeep(JSON.parse(stripped));
+      const validated = validatePromptReviewResult(raw, subject.promptReview);
+      const signature = promptReviewResultSignature(validated);
+      const id = getPromptReviewRepo() + ':' + subject.promptReview.key + ':' + reviewHash(signature);
+      const operation = options.operation || reviewJournal.current.begin(id, {
+        repo: getPromptReviewRepo(), subject, rawJson: JSON.stringify(raw), signature,
+        autoAdoptNeedsRevision: !!options.autoAdoptNeedsRevision,
+      });
+      if (operation.payload.repo !== getPromptReviewRepo() || operation.payload.signature !== signature)
+        throw new Error('恢复任务仓库或内容不匹配，已停止。');
+      refreshReviewPending();
+      const run = async () => {
+        const current = findPromptReviewSubject(subjectId);
+        if (current?.promptReview?.appliedResultSignature === signature) {
+          reviewJournal.current.finish(operation); refreshReviewPending(); return true;
+        }
+        if (buildPromptReviewDraft(current).sourceHash !== buildPromptReviewDraft(operation.payload.subject).sourceHash)
+          throw new Error('审核期间 Prompt 已修改；原结果和当前版本均保留，请导出核对。');
+        const ok = await applyPromptReviewOperation(subjectId, operation.payload.rawJson, {
+          ...options, operation, autoAdoptNeedsRevision: operation.payload.autoAdoptNeedsRevision,
+        });
+        if (ok) reviewJournal.current.finish(operation);
+        refreshReviewPending();
+        return ok;
+      };
+      // Serializes the same review across tabs, including refresh/retry.
+      if (!navigator.locks) throw new Error('浏览器不支持安全审核锁；结果已本地保留，请使用本机 Chrome。');
+      return await navigator.locks.request('awen-review:' + operation.payload.repo + ':' + subjectId, run);
+    } catch (error) {
+      if (typeof options.onError === 'function') options.onError(error);
+      pushToast(`审核未完成：${error.message}，可导出恢复包或重试。`, { kind: 'error', duration: 12000 });
+      return false;
+    }
+  }
+  async function applyPromptReviewOperation(subjectId, rawJson, options = {}) {
+    const target = reviewTarget();
+    const writeTaskFile = (path, text, message, sha) => writeReviewFile(path, text, message, sha, target);
+    const readTaskFile = path => readReviewFile(path, target);
+    const upsertTaskManifest = review => upsertReviewManifest(review, target);
     const silent = !!options.silent;
     const autoAdoptNeedsRevision = !!options.autoAdoptNeedsRevision;
     const reportError = error => { if (typeof options.onError === 'function') options.onError(error); };
-    const subject = findPromptReviewSubject(subjectId);
+    const subject = options.operation.payload.subject;
     const review = subject?.promptReview;
     if (!subject?.ai || !review) {
       reportError(new Error('请先提交该曲目的初稿。'));
@@ -6404,18 +7124,25 @@ function App() {
     let result;
     try {
       const stripped = String(rawJson || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-      result = validatePromptReviewResult(JSON.parse(stripped), review);
+      result = validatePromptReviewResult(repairUtf8MojibakeDeep(JSON.parse(stripped)), review);
     } catch (e) {
       reportError(e);
       if (!silent) pushToast(`审核 JSON 无法应用：${e.message || e}`, { kind: 'error', duration: 10000 });
       return false;
+    }
+    result.reviewedAt = options.operation.createdAt;
+    function applyLocalReview(id, nextReview, recipe) {
+      const current = findPromptReviewSubject(id);
+      if (buildPromptReviewDraft(current).sourceHash !== buildPromptReviewDraft(subject).sourceHash)
+        throw new Error('远端已记录原审核，但本机 Prompt 已改变；未覆盖新编辑，恢复任务保留。');
+      return updatePromptReviewSubject(id, nextReview, recipe);
     }
     const revision = (review.reviewCount || 0) + 1;
     const reviewPath = `reviews/${review.key}-r${String(revision).padStart(2, '0')}.json`;
     const isApproved = result.decision === 'approve' || result.decision === 'approve_with_changes';
     const approvedPath = isApproved ? `prompts/approved/${review.key}-r${String(revision).padStart(2, '0')}.md` : null;
     try {
-      await writeReviewFile(reviewPath, JSON.stringify({ schemaVersion: 1, revision, ...result }, null, 2) + '\n',
+      await writeTaskFile(reviewPath, JSON.stringify({ schemaVersion: 1, revision, ...result }, null, 2) + '\n',
         `review: record ${review.id} r${String(revision).padStart(2, '0')}`);
       if (isApproved) {
         const previousRecipe = normalizeSunoRecipe(subject.ai.suno?.recipe, {
@@ -6432,11 +7159,11 @@ function App() {
           title: result.revised.title || previousRecipe.title,
           workspace: previousRecipe.workspace,
         });
-        await writeReviewFile(approvedPath, renderApprovedReviewMarkdown(review, result, revision),
+        await writeTaskFile(approvedPath, renderApprovedReviewMarkdown(review, result, revision),
           `review: approve ${review.id} r${String(revision).padStart(2, '0')}`);
         const nextReview = { ...review, title: approvedRecipe.title, status: 'approved', latestReviewPath: reviewPath, approvedPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, appliedResultSignature: promptReviewResultSignature(result), adoptedRevision: null };
-        await upsertReviewManifest(nextReview);
-        updatePromptReviewSubject(subjectId, nextReview, approvedRecipe);
+        await upsertTaskManifest(nextReview);
+        applyLocalReview(subjectId, nextReview, approvedRecipe);
         if (!silent) pushToast(`已应用 ChatGPT 修改，并推送批准版本 r${String(revision).padStart(2, '0')}。`);
       } else if (result.decision === 'needs_revision' && autoAdoptNeedsRevision) {
         const currentRecipe = normalizeSunoRecipe(subject.ai.suno?.recipe, {
@@ -6466,12 +7193,12 @@ function App() {
             },
           },
         };
-        const nextDraft = buildPromptReviewDraft(revisedSubject);
+        const nextDraft = { ...buildPromptReviewDraft(revisedSubject), submittedAt: options.operation.createdAt };
         if (nextDraft.sourceHash === review.sourceHash) {
           // There is nothing new to submit, but preserve the reviewer result.
         const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, appliedResultSignature: promptReviewResultSignature(result), adoptedRevision: null };
-          await upsertReviewManifest(nextReview);
-          updatePromptReviewSubject(subjectId, nextReview);
+          await upsertTaskManifest(nextReview);
+          applyLocalReview(subjectId, nextReview);
         } else {
           const reviewRound = Math.max(1, Number(review.reviewRound) || 1) + 1;
           const nextReview = {
@@ -6499,25 +7226,25 @@ function App() {
             schemaVersion: 1,
             event: 'auto_adopted_revision_from_album_review',
             id: review.id,
-            adoptedAt: new Date().toISOString(),
+            adoptedAt: options.operation.createdAt,
             from: { key: review.key, sourceHash: review.sourceHash, sourceFile: review.sourcePath, reviewFile: reviewPath },
             to: { key: nextReview.key, sourceHash: nextReview.sourceHash, sourceFile: nextReview.sourcePath },
             revised: nextReview.adoptedRevision,
           };
-          const existingAdoption = await readReviewFile(adoptionPath);
-          await writeReviewFile(adoptionPath, JSON.stringify(adoptionRecord, null, 2) + '\n',
+          const existingAdoption = await readTaskFile(adoptionPath);
+          await writeTaskFile(adoptionPath, JSON.stringify(adoptionRecord, null, 2) + '\n',
             `review: auto-adopt ${review.id} r${String(revision).padStart(2, '0')}`, existingAdoption?.sha);
-          const existingDraft = await readReviewFile(nextReview.sourcePath);
-          await writeReviewFile(nextReview.sourcePath, renderReviewDraftMarkdown(nextReview),
+          const existingDraft = await readTaskFile(nextReview.sourcePath);
+          await writeTaskFile(nextReview.sourcePath, renderReviewDraftMarkdown(nextReview),
             `review: submit revised ${nextReview.id} for ChatGPT audit`, existingDraft?.sha);
-          await upsertReviewManifest(nextReview);
-          updatePromptReviewSubject(subjectId, nextReview, adoptedRecipe);
+          await upsertTaskManifest(nextReview);
+          applyLocalReview(subjectId, nextReview, adoptedRecipe);
         }
         if (!silent) pushToast(`已直接写入 GPT 修改，并提交第 ${Math.max(1, Number(review.reviewRound) || 1) + 1} 轮审核。`);
       } else {
           const nextReview = { ...review, status: result.decision, latestReviewPath: reviewPath, applicationPath: null, appliedAt: null, reviewCount: revision, lastReview: result, appliedResultSignature: promptReviewResultSignature(result), adoptedRevision: null };
-        await upsertReviewManifest(nextReview);
-        updatePromptReviewSubject(subjectId, nextReview);
+        await upsertTaskManifest(nextReview);
+        applyLocalReview(subjectId, nextReview);
         if (!silent) pushToast('审核结论已记录；原始 Suno 配方保持不变。');
       }
       return true;
@@ -6527,8 +7254,43 @@ function App() {
       return false;
     }
   }
-  async function adoptPromptReviewRevision(subjectId) {
-    const subject = findPromptReviewSubject(subjectId);
+  function commitReviewAction(operation, review, recipe) {
+    const current = findPromptReviewSubject(operation.payload.subject.id);
+    if (buildPromptReviewDraft(current).sourceHash !== buildPromptReviewDraft(operation.payload.subject).sourceHash)
+      throw new Error('操作期间本地 Prompt 已改变；未覆盖新编辑，恢复任务保留。');
+    return updatePromptReviewSubject(current.id, { ...review, reviewOperationId: operation.id }, recipe);
+  }
+  async function runReviewAction(kind, subjectId, restored = null) {
+    try {
+      const subject = restored?.payload.subject || findPromptReviewSubject(subjectId);
+      if (!subject?.promptReview) throw new Error('没有可操作的审核记录。');
+      const operation = restored || reviewJournal.current.begin(getPromptReviewRepo() + ':' + kind + ':' +
+        subject.promptReview.key + ':' + subject.promptReview.reviewCount, { kind, repo: getPromptReviewRepo(), subject });
+      refreshReviewPending();
+      if (operation.payload.repo !== getPromptReviewRepo()) throw new Error('请切回恢复任务原审核仓库。');
+      if (!navigator.locks) throw new Error('浏览器不支持安全审核锁，请使用本机 Chrome。');
+      return await navigator.locks.request('awen-review:' + operation.payload.repo + ':' + subjectId, async () => {
+        const current = findPromptReviewSubject(subjectId);
+        if (current?.promptReview?.reviewOperationId === operation.id) {
+          reviewJournal.current.finish(operation); refreshReviewPending(); return true;
+        }
+        if (buildPromptReviewDraft(current).sourceHash !== buildPromptReviewDraft(subject).sourceHash)
+          throw new Error('恢复任务与当前 Prompt 不同；保留双方，请导出核对。');
+        const ok = kind === 'adopt' ? await adoptPromptReviewRevisionOperation(subjectId, operation)
+          : await markPromptReviewAppliedOperation(subjectId, operation);
+        if (ok) reviewJournal.current.finish(operation);
+        refreshReviewPending(); return ok;
+      });
+    } catch (error) { pushToast(`操作未完成：${error.message}`, { kind: 'error' }); return false; }
+  }
+  async function adoptPromptReviewRevision(subjectId) { return runReviewAction('adopt', subjectId); }
+  async function markPromptReviewApplied(subjectId) { return runReviewAction('mark', subjectId); }
+  async function adoptPromptReviewRevisionOperation(subjectId, operation) {
+    const target = reviewTarget();
+    const writeTaskFile = (path, text, message, sha) => writeReviewFile(path, text, message, sha, target);
+    const readTaskFile = path => readReviewFile(path, target);
+    const upsertTaskManifest = review => upsertReviewManifest(review, target);
+    const subject = operation.payload.subject;
     const review = subject?.promptReview;
     const revised = review?.lastReview?.revised;
     if (!subject?.ai || review?.status !== 'needs_revision' || !revised) {
@@ -6564,7 +7326,7 @@ function App() {
         },
       },
     };
-    const nextDraft = buildPromptReviewDraft(revisedSubject);
+    const nextDraft = { ...buildPromptReviewDraft(revisedSubject), submittedAt: operation.createdAt };
     if (nextDraft.sourceHash === review.sourceHash) {
       pushToast('GPT 建议没有产生可提交的配方变化。请先手动调整或重新审核。', { kind: 'warn' });
       return false;
@@ -6595,7 +7357,7 @@ function App() {
       schemaVersion: 1,
       event: 'adopted_revision_for_resubmission',
       id: review.id,
-      adoptedAt: new Date().toISOString(),
+      adoptedAt: operation.createdAt,
       from: {
         key: review.key,
         sourceHash: review.sourceHash,
@@ -6616,14 +7378,14 @@ function App() {
       },
     };
     try {
-      const existingAdoption = await readReviewFile(adoptionPath);
-      await writeReviewFile(adoptionPath, JSON.stringify(adoptionRecord, null, 2) + '\n',
+      const existingAdoption = await readTaskFile(adoptionPath);
+      await writeTaskFile(adoptionPath, JSON.stringify(adoptionRecord, null, 2) + '\n',
         `review: adopt ${review.id} r${revision} for resubmission`, existingAdoption?.sha);
-      const existingDraft = await readReviewFile(nextReview.sourcePath);
-      await writeReviewFile(nextReview.sourcePath, renderReviewDraftMarkdown(nextReview),
+      const existingDraft = await readTaskFile(nextReview.sourcePath);
+      await writeTaskFile(nextReview.sourcePath, renderReviewDraftMarkdown(nextReview),
         `review: submit revised ${nextReview.id} for ChatGPT audit`, existingDraft?.sha);
-      await upsertReviewManifest(nextReview);
-      updatePromptReviewSubject(subjectId, nextReview, adoptedRecipe);
+      await upsertTaskManifest(nextReview);
+      commitReviewAction(operation, nextReview, adoptedRecipe);
       pushToast(`已采纳 GPT 修改，并将「${adoptedRecipe.title}」提交为新一轮审核。`);
       return true;
     } catch (e) {
@@ -6631,15 +7393,19 @@ function App() {
       return false;
     }
   }
-  async function markPromptReviewApplied(subjectId) {
-    const subject = findPromptReviewSubject(subjectId);
+  async function markPromptReviewAppliedOperation(subjectId, operation) {
+    const target = reviewTarget();
+    const writeTaskFile = (path, text, message, sha) => writeReviewFile(path, text, message, sha, target);
+    const readTaskFile = path => readReviewFile(path, target);
+    const upsertTaskManifest = review => upsertReviewManifest(review, target);
+    const subject = operation.payload.subject;
     const review = subject?.promptReview;
     if (!review || review.status !== 'approved' || !review.approvedPath) {
       pushToast('只有已批准的审核版本可以标记为已应用 Suno。', { kind: 'warn' });
       return false;
     }
     if (!reviewRepoReady()) return false;
-    const appliedAt = new Date().toISOString();
+    const appliedAt = operation.createdAt;
     const applicationPath = `reviews/${review.key}-r${String(review.reviewCount || 0).padStart(2, '0')}-applied-to-suno.json`;
     const applicationRecord = {
       schemaVersion: 1,
@@ -6650,12 +7416,12 @@ function App() {
       appliedAt,
     };
     try {
-      const existing = await readReviewFile(applicationPath);
-      await writeReviewFile(applicationPath, JSON.stringify(applicationRecord, null, 2) + '\n',
+      const existing = await readTaskFile(applicationPath);
+      await writeTaskFile(applicationPath, JSON.stringify(applicationRecord, null, 2) + '\n',
         `review: mark ${review.id} as applied to Suno`, existing?.sha);
       const nextReview = { ...review, status: 'applied_to_suno', applicationPath, appliedAt };
-      await upsertReviewManifest(nextReview);
-      updatePromptReviewSubject(subjectId, nextReview);
+      await upsertTaskManifest(nextReview);
+      commitReviewAction(operation, nextReview);
       pushToast('已标记为“已应用 Suno”，并同步推送到 GitHub。');
       return true;
     } catch (e) {
@@ -7158,9 +7924,28 @@ Calm, warm, instrumental, no vocals.`;
       const completedAt = new Date().toLocaleString('zh-CN', {
         year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
       });
-      setAlbums((prev) => prev.map((x) => x.id === id
-        ? { ...x, generating: false, data, aiProvider, aiProviderUsed, genTime, createdAt: completedAt }
-        : x));
+      const current = albums.find(album => album.id === id) || {
+        id,
+        axisLabel: axis?.label || 'Album',
+        base: { ...base },
+        status: 'Draft',
+      };
+      const completedAlbum = {
+        ...current,
+        generating: false,
+        starred: true,
+        data,
+        aiProvider,
+        aiProviderUsed,
+        genTime,
+        createdAt: completedAt,
+      };
+      setAlbums((prev) => prev.map((x) => x.id === id ? completedAlbum : x));
+      // Newly generated albums are saved as canonical records immediately.
+      // This is intentionally fire-and-forget: generating music prompts never
+      // waits for a network round trip, while the local snapshot is already
+      // available if GitHub is temporarily unreachable.
+      void persistCanonicalAlbum(completedAlbum, { silent: true });
       setBusy(false);
     }
   }
@@ -7195,18 +7980,44 @@ Calm, warm, instrumental, no vocals.`;
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   function setAlbumStatus(id, status) {
-    setAlbums((prev) => prev.map((a) => {
-      if (a.id !== id) return a;
-      if (status === 'Published' && !a.releaseId) {
-        const rid = 'ALB-' + String(albumPubSeq).padStart(3, '0');
-        setAlbumPubSeq(n => n + 1);
-        return { ...a, status, releaseId: rid };
-      }
-      return { ...a, status };
-    }));
+    const album = albums.find(item => item.id === id);
+    if (!album) return;
+    let updatedAlbum = { ...album, status, starred: true };
+    if (status === 'Published' && !album.releaseId) {
+      updatedAlbum.releaseId = 'ALB-' + String(albumPubSeq).padStart(3, '0');
+      setAlbumPubSeq(n => n + 1);
+    }
+    const statusLabels = { Draft: '草稿', Approved: '已采用', Queued: '排队中', Published: '已发布', Discarded: '舍弃 ❌' };
+    // Do not optimistically change the Album status.  This is the one
+    // workflow field the user owns locally, so the visible value must remain
+    // the last durable value if the browser storage write is refused.
+    // persistCanonicalAlbum updates the shelf synchronously only after its
+    // local library commit succeeds; remote confirmation happens afterwards.
+    void persistCanonicalAlbum(updatedAlbum, {
+      successMessage: `专辑状态“${statusLabels[status] || status}”已同步到 GitHub 曲库`,
+      statusWrite: true,
+    });
   }
-  function setPinAlbum(id) {setAlbums((prev) => prev.map((a) => a.id === id ? { ...a, pinned: !a.pinned } : a));}
-  function removeAlbum(id) {setAlbums((prev) => prev.filter((a) => a.pinned || a.id !== id));}
+  function setPinAlbum(id) {
+    const album = albums.find(item => item.id === id);
+    if (!album) return;
+    const updatedAlbum = { ...album, pinned: !album.pinned, starred: true };
+    setAlbums(prev => prev.map(item => item.id === id ? updatedAlbum : item));
+    void persistCanonicalAlbum(updatedAlbum, { silent: true });
+  }
+  function removeAlbum(id) {
+    const album = albums.find(item => item.id === id);
+    if (album?.pinned) { pushToast('已固定的专辑不会被移除。请先取消固定。', { kind: 'warn' }); return; }
+    void removeFromLibrary(id);
+  }
+  function clearAlbumShelf() {
+    const removeIds = new Set(albums.filter(album => !album.pinned).map(album => album.id));
+    if (!removeIds.size) return;
+    const updated = libItems.filter(item => !removeIds.has(item.id));
+    setCanonicalLibraryItems(updated);
+    if (!safeLS.get('github_pat')) return;
+    void syncCanonicalLibraryToGitHub({ successMessage: '已从 GitHub 曲库移除未固定专辑' });
+  }
 
   const showLock = mode === 'shuffle';
   const sampleRef = A.REFERENCE;
@@ -7221,6 +8032,14 @@ Calm, warm, instrumental, no vocals.`;
         onSubmit={(v) => { setTokenModalOpen(false); window.__awen_resolveToken(v); }}
         onCancel={() => { setTokenModalOpen(false); window.__awen_resolveToken(''); }} />
       <ToastContainer toasts={toasts} onClose={dismissToast} onAction={handleToastAction} />
+      <div className="settings-note" role="status" style={{padding:'10px 18px'}}>
+        {snapshotConflict && <strong>{snapshotConflict} · </strong>}
+        {workspaceError && <strong>{workspaceError} · </strong>}{saveNotice}
+        <span> · 审核恢复任务：{reviewPending < 0 ? '记录损坏，请导出核对' : reviewPending}</span>
+        {reviewPending > 0 && <button className="settings-clear-btn" onClick={retryPendingReviews}>重试未完成审核</button>}
+        <button className="settings-clear-btn" onClick={() => syncCanonicalLibraryToGitHub()}>重试曲库同步</button>
+        <button className="settings-clear-btn" onClick={exportReliabilityBackup}>导出本地备份 / 冲突明细</button>
+      </div>
       {!hasKey && (
         <div className="key-banner">
           <span className="key-banner-label">🔑 {window.I18N.isZh() ? `${providerConfig.label} · 填入 API Key` : `${providerConfig.label} · Enter API Key`}</span>
@@ -7377,7 +8196,7 @@ Calm, warm, instrumental, no vocals.`;
           <div className="feed-head">
             <span className="feed-title">{T('albumShelf')}</span>
             {albums.length > 0 &&
-          <button type="button" className="feed-clear" onClick={() => setAlbums((prev) => prev.filter((a) => a.pinned))}>{T('clearAll')}</button>
+          <button type="button" className="feed-clear" onClick={clearAlbumShelf}>{T('clearAll')}</button>
           }
           </div>
           {albums.length === 0 ?

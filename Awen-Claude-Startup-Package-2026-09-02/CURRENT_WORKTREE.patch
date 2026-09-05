@@ -1,0 +1,550 @@
+diff --git a/docs/index.html b/docs/index.html
+index 5378ac8..b2ccc9b 100644
+--- a/docs/index.html
++++ b/docs/index.html
+@@ -5544,10 +5544,17 @@ function App() {
+     if (window.__awen_resolveToken) window.__awen_resolveToken(v);
+   }
+   const [settingsOpen, setSettingsOpen] = React.useState(false);
++  // The library is the canonical collection for anything a user keeps.  The
++  // Album shelf is derived from its album records, so a reload or another
++  // computer cannot show a different set from the ☆ library.
+   const [libItems, setLibItems] = React.useState([]);
+   const [libSha, setLibSha] = React.useState(null);
+   const [libLoading, setLibLoading] = React.useState(false);
+   const [libError, setLibError] = React.useState(null);
++  // Every write goes through one queue.  A batch album review can update many
++  // tracks at once; serialising those writes prevents later status snapshots
++  // from being rejected or overwritten by an earlier GitHub SHA.
++  const librarySyncQueueRef = React.useRef(Promise.resolve());
+ 
+   // Listen for AI flow's request-token event
+   React.useEffect(() => {
+@@ -5711,7 +5718,14 @@ function App() {
+     const recipes = Array.isArray(item.sunoRecipes)
+       ? item.sunoRecipes.map(recipe => normalizeSunoRecipe(recipe, { workspace }))
+       : [];
+-    return { ...item, type: 'album', workspace, sunoRecipes: recipes };
++    const albumSnapshot = item.albumSnapshot?.data
++      ? {
++          ...item.albumSnapshot,
++          data: attachAlbumSunoRecipes(item.albumSnapshot.data, sunoDefaults),
++          coverAsset: item.albumSnapshot.coverAsset || item.coverAsset || null,
++        }
++      : null;
++    return { ...item, type: 'album', workspace, sunoRecipes: recipes, albumSnapshot };
+   }
+   function readLocalLibrary() {
+     try {
+@@ -5719,16 +5733,153 @@ function App() {
+       return Array.isArray(parsed?.songs) ? parsed.songs.map(hydrateLibraryItem).filter(Boolean) : [];
+     } catch (e) { return []; }
+   }
++  function localLibrarySchemaVersion() {
++    try {
++      return Number(JSON.parse(safeLS.get(LOCAL_LIB_KEY) || 'null')?.version || 0);
++    } catch (e) { return 0; }
++  }
+   function writeLocalLibrary(items) {
+-    return safeLS.set(LOCAL_LIB_KEY, JSON.stringify({ version: 2, songs: items.map(hydrateLibraryItem) }));
++    return safeLS.set(LOCAL_LIB_KEY, JSON.stringify({ version: 3, songs: items.map(hydrateLibraryItem) }));
+   }
+-  function mergeLibraryItems(remoteItems, localItems) {
++  function mergeLibraryItems(remoteItems, localItems, preferLocal = true) {
+     const merged = new Map();
+-    [...(remoteItems || []), ...(localItems || [])].forEach(item => {
++    const ordered = preferLocal
++      ? [...(remoteItems || []), ...(localItems || [])]
++      : [...(localItems || []), ...(remoteItems || [])];
++    ordered.forEach(item => {
+       if (item?.id) merged.set(item.id, item);
+     });
+     return [...merged.values()].sort((a, b) => String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
+   }
++
++  function libraryAlbumSnapshot(album) {
++    if (!album?.data) return null;
++    return {
++      ...album,
++      generating: false,
++      starred: true,
++      coverAsset: libraryCoverAsset(album.coverAsset),
++      data: attachAlbumSunoRecipes(album.data, sunoDefaults),
++    };
++  }
++  function albumLibraryEntry(album, previous = {}) {
++    const ai = album?.data || {};
++    const workspace = ai.workspace || `Awen · ${ai.album || album?.id || 'Untitled Album'}`;
++    const snapshot = libraryAlbumSnapshot({ ...album, starred: true });
++    const statusLabels = { Draft: '草稿', Approved: '已采用', Queued: '排队中', Published: '已发布' };
++    const reviewStates = (ai.tracks || []).map((track, index) => ({
++      track: index + 1,
++      promptId: albumTrackPromptId(album.id, index),
++      status: track?.promptReview?.status || 'not_submitted',
++      reviewRound: track?.promptReview?.reviewRound || 0,
++      adopted: !!track?.promptReview?.adoptedRevision,
++      appliedToSuno: track?.promptReview?.status === 'applied_to_suno',
++    }));
++    return {
++      ...previous,
++      id: album.id,
++      type: 'album',
++      title: ai.album || previous.title || album.id,
++      tagline: ai.concept || ai.description || previous.tagline || album.axisLabel || '',
++      axisLabel: album.axisLabel || previous.axisLabel || '',
++      base: album.base || previous.base || {},
++      status: album.status || previous.status || 'Draft',
++      pinned: !!album.pinned,
++      workspace,
++      aiProvider: album.aiProvider || previous.aiProvider || null,
++      aiProviderUsed: album.aiProviderUsed !== false,
++      genTime: album.genTime || previous.genTime || null,
++      createdAt: album.createdAt || previous.createdAt || null,
++      savedAt: previous.savedAt || new Date().toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
++      publishedAt: previous.publishedAt || album.publishedAt || null,
++      workflow: {
++        albumStatus: album.status || previous.workflow?.albumStatus || 'Draft',
++        albumStatusLabel: statusLabels[album.status || previous.workflow?.albumStatus || 'Draft'] || (album.status || 'Draft'),
++        statusUpdatedAt: new Date().toISOString(),
++        tracks: reviewStates,
++      },
++      coverAsset: libraryCoverAsset(album.coverAsset) || previous.coverAsset || null,
++      sunoRecipes: (ai.tracks || []).map(track => normalizeSunoRecipe(track.sunoRecipe, {
++        lyrics: track.lyrics,
++        style: track.style || ai.anchor,
++        exclude: track.exclude,
++        title: track.title,
++        workspace,
++      })),
++      albumSnapshot: snapshot,
++    };
++  }
++  function albumFromLibraryEntry(item) {
++    const snapshot = item?.albumSnapshot;
++    if (snapshot?.data) {
++      return {
++        ...snapshot,
++        id: item.id,
++        axisLabel: item.axisLabel || snapshot.axisLabel,
++        base: item.base || snapshot.base || {},
++        status: item.status || snapshot.status || 'Draft',
++        pinned: !!item.pinned,
++        starred: true,
++        aiProvider: item.aiProvider || snapshot.aiProvider || null,
++        aiProviderUsed: item.aiProviderUsed !== false,
++        genTime: item.genTime || snapshot.genTime || null,
++        createdAt: item.createdAt || snapshot.createdAt || null,
++        coverAsset: snapshot.coverAsset || item.coverAsset || null,
++        data: attachAlbumSunoRecipes(snapshot.data, sunoDefaults),
++      };
++    }
++    // Version 1/2 entries did not keep a full AlbumCard snapshot.  Preserve
++    // them by rebuilding the minimum complete card from their Suno recipes.
++    const workspace = item.workspace || `Awen · ${item.title || item.id}`;
++    const tracks = (item.sunoRecipes || []).map((recipe, index) => {
++      const normalized = normalizeSunoRecipe(recipe, { workspace, title: recipe?.title || `Track ${index + 1}` });
++      return {
++        title: normalized.title,
++        role: 'Saved library track',
++        scene: '',
++        prompt: normalized.style,
++        lyrics: normalized.structurePrompt || normalized.lyricsSkeleton || '',
++        style: normalized.style,
++        exclude: normalized.exclude,
++        sunoRecipe: normalized,
++      };
++    });
++    return {
++      id: item.id,
++      axisLabel: item.axisLabel || '曲库专辑',
++      base: item.base || {},
++      status: item.status || 'Draft',
++      pinned: !!item.pinned,
++      starred: true,
++      aiProvider: item.aiProvider || null,
++      aiProviderUsed: item.aiProviderUsed !== false,
++      genTime: item.genTime || null,
++      createdAt: item.createdAt || null,
++      coverAsset: item.coverAsset || null,
++      data: {
++        album: item.title || item.id,
++        concept: item.tagline || '',
++        description: item.tagline || '',
++        workspace,
++        anchor: tracks[0]?.style || '',
++        tracks,
++      },
++    };
++  }
++  function setCanonicalLibraryItems(items, { syncAlbumShelf = true } = {}) {
++    const normalized = (items || []).map(hydrateLibraryItem).filter(Boolean);
++    writeLocalLibrary(normalized);
++    setLibItems(normalized);
++    if (syncAlbumShelf) {
++      setAlbums(prev => {
++        const inFlight = new Map(prev.filter(album => album?.generating).map(album => [album.id, album]));
++        return normalized
++          .filter(item => item.type === 'album')
++          .map(item => inFlight.get(item.id) || albumFromLibraryEntry(item));
++      });
++    }
++    return normalized;
++  }
+   function githubSyncMessage(error) {
+     const repo = getGitHubRepo();
+     if (error?.status === 403) {
+@@ -5757,31 +5908,116 @@ function App() {
+   async function loadLibrary() {
+     setLibLoading(true); setLibError(null);
+     const localItems = readLocalLibrary();
+-    setLibItems(localItems);
++    // One-time migration: older builds kept completed albums only in the
++    // browser state.  Turn them into canonical album records before syncing.
++    const localIds = new Set(localItems.map(item => item.id));
++    // Only migrate the old independent shelf once.  Subsequent launches must
++    // not resurrect a record that was deliberately removed from GitHub on
++    // another device.
++    const migrated = localLibrarySchemaVersion() < 3 ? albums
++      .filter(album => album?.data && !album.generating && !localIds.has(album.id))
++      .map(album => albumLibraryEntry(album)) : [];
++    const localWithMigratedAlbums = [...migrated, ...localItems];
++    setCanonicalLibraryItems(localWithMigratedAlbums);
+     if (!safeLS.get('github_pat')) { setLibLoading(false); return; }
+     try {
+       const data = await ghFetch('GET', `https://api.github.com/repos/${getGitHubRepo()}/contents/${GH_LIB_PATH}`);
+       const parsed = JSON.parse(atob(data.content.replace(/\n/g, '')));
+-      const merged = mergeLibraryItems((parsed.songs || []).map(hydrateLibraryItem), localItems);
+-      setLibItems(merged); writeLocalLibrary(merged); setLibSha(data.sha);
++      // GitHub wins when both copies have an entry with the same id.  Local
++      // records that have not been uploaded yet are retained alongside it.
++      const merged = mergeLibraryItems((parsed.songs || []).map(hydrateLibraryItem), localWithMigratedAlbums, false);
++      setCanonicalLibraryItems(merged); setLibSha(data.sha);
+     } catch (e) {
+-      if (e.status === 404) { setLibItems(localItems); setLibSha(null); }
+-      else { setLibItems(localItems); setLibError(`GitHub 同步失败，当前显示本地收藏。${githubSyncMessage(e)}`); }
++      if (e.status === 404) { setCanonicalLibraryItems(localWithMigratedAlbums); setLibSha(null); }
++      else { setCanonicalLibraryItems(localWithMigratedAlbums); setLibError(`GitHub 同步失败，当前显示本地收藏。${githubSyncMessage(e)}`); }
+     }
+     setLibLoading(false);
+   }
+   async function _writeLibrary(items, sha) {
+-    const json = JSON.stringify({ version: 2, songs: items.map(hydrateLibraryItem) }, null, 2);
++    const json = JSON.stringify({ version: 3, songs: items.map(hydrateLibraryItem) }, null, 2);
+     const content = btoa(unescape(encodeURIComponent(json)));
+     const res = await ghFetch('PUT', `https://api.github.com/repos/${getGitHubRepo()}/contents/${GH_LIB_PATH}`,
+       { message: `update library (${items.length} items)`, content, ...(sha ? { sha } : {}) });
+     setLibSha(res.content.sha);
+   }
++  function syncCanonicalLibraryToGitHub({ silent = false, successMessage = '' } = {}) {
++    if (!safeLS.get('github_pat')) return Promise.resolve(false);
++    const run = async () => {
++      let lastError = null;
++      // GitHub Contents PUT needs the newest SHA. Retry once after a 409 in
++      // case another queued/status update completed between the read and write.
++      for (let attempt = 0; attempt < 2; attempt += 1) {
++        try {
++          let remoteItems = [];
++          let remoteSha = null;
++          try {
++            const remote = await ghFetch('GET', `https://api.github.com/repos/${getGitHubRepo()}/contents/${GH_LIB_PATH}`);
++            const parsed = JSON.parse(atob(remote.content.replace(/\n/g, '')));
++            remoteItems = parsed.songs || [];
++            remoteSha = remote.sha || null;
++          } catch (error) {
++            if (error.status !== 404) throw error;
++          }
++          // Read again inside the queue so no status update that was made
++          // while waiting can be lost.
++          const currentLocal = readLocalLibrary();
++          const merged = mergeLibraryItems(remoteItems, currentLocal);
++          await _writeLibrary(merged, remoteSha);
++          setCanonicalLibraryItems(merged);
++          setLibError(null);
++          if (!silent && successMessage) pushToast(successMessage);
++          return true;
++        } catch (error) {
++          lastError = error;
++          if (error?.status !== 409 || attempt === 1) break;
++        }
++      }
++      const message = `GitHub 曲库同步失败，当前状态已保存在本机。${githubSyncMessage(lastError)}`;
++      setLibError(message);
++      if (!silent) pushToast(message, { kind: 'warn', duration: 10000 });
++      return false;
++    };
++    const queued = librarySyncQueueRef.current.then(run, run);
++    librarySyncQueueRef.current = queued.catch(() => {});
++    return queued;
++  }
+   function libraryCoverAsset(asset) {
+     if (!asset?.path) return null;
+     const { previewDataUrl, ...stored } = asset;
+     return stored;
+   }
++  async function persistCanonicalAlbum(album, { silent = false, successMessage = '' } = {}) {
++    if (!album?.id || !album.data) return false;
++    const source = mergeLibraryItems([], readLocalLibrary());
++    const existing = source.find(item => item.id === album.id) || {};
++    const entry = albumLibraryEntry({ ...album, starred: true }, existing);
++    const localUpdated = source.some(item => item.id === album.id)
++      ? source.map(item => item.id === album.id ? entry : item)
++      : [entry, ...source];
++    if (!writeLocalLibrary(localUpdated)) {
++      if (!silent) pushToast('本地曲库保存失败：浏览器存储不可用或空间不足。', { kind: 'error' });
++      return false;
++    }
++    setCanonicalLibraryItems(localUpdated);
++    if (!safeLS.get('github_pat')) {
++      if (!silent) pushToast(
++        successMessage
++          ? `${successMessage.replace('已同步到 GitHub 曲库', '已保存到本机；请配置 GitHub PAT 以同步到其他设备')}`
++          : `⭐ 已收藏「${entry.title}」；请配置 GitHub PAT 以同步到其他设备。`,
++        { kind: 'warn', duration: 8000 }
++      );
++      return true;
++    }
++    const synced = await syncCanonicalLibraryToGitHub({
++      silent,
++      successMessage: successMessage || `⭐ 已收藏「${entry.title}」并推送到 GitHub`,
++    });
++    return synced;
++  }
++
++  // From now on the first render also pulls the cloud library.  The Album
++  // shelf no longer depends on the previous browser's awen_matrix_state_v1.
++  React.useEffect(() => { loadLibrary(); }, []);
+   function readImageAsDataUrl(file) {
+     return new Promise((resolve, reject) => {
+       const reader = new FileReader();
+@@ -5865,31 +6101,11 @@ function App() {
+         downloadUrl: response.content?.download_url || '',
+         previewDataUrl,
+       };
+-      setAlbums(prev => prev.map(item => item.id === albumId ? { ...item, coverAsset } : item));
+-
+-      // If this album is already in the favourites library, keep its GitHub
+-      // metadata pointed at the newly uploaded image without changing whether
+-      // the user has starred the album.
+-      if (album.starred) {
+-        const storedAsset = libraryCoverAsset(coverAsset);
+-        const localItems = readLocalLibrary();
+-        const localUpdated = localItems.map(item => item.id === albumId ? { ...item, coverAsset: storedAsset } : item);
+-        writeLocalLibrary(localUpdated);
+-        setLibItems(prev => mergeLibraryItems(prev, localUpdated));
+-        let remoteItems = [], currentLibrarySha = null;
+-        try {
+-          const remote = await ghFetch('GET', `https://api.github.com/repos/${repo}/contents/${GH_LIB_PATH}`);
+-          const parsed = JSON.parse(atob(remote.content.replace(/\n/g, '')));
+-          remoteItems = parsed.songs || [];
+-          currentLibrarySha = remote.sha;
+-        } catch (error) {
+-          if (error.status !== 404) throw error;
+-        }
+-        const updated = mergeLibraryItems(remoteItems, localUpdated);
+-        await _writeLibrary(updated, currentLibrarySha);
+-        setLibItems(updated);
+-        writeLocalLibrary(updated);
+-      }
++      const updatedAlbum = { ...album, coverAsset, starred: true };
++      setAlbums(prev => prev.map(item => item.id === albumId ? updatedAlbum : item));
++      // Album records now always live in the canonical library; saving the
++      // complete snapshot also preserves the cover when another device loads.
++      await persistCanonicalAlbum(updatedAlbum, { silent: true });
+       pushToast(`封面已上传并推送到 GitHub：${path}`);
+       return true;
+     } catch (error) {
+@@ -5897,9 +6113,14 @@ function App() {
+       return false;
+     }
+   }
+-  async function addToLibrary(item) {
++  async function addToLibrary(item, { silent = false } = {}) {
+     const pat = safeLS.get('github_pat');
+     const isSong = !!item.sel;
++    if (!isSong) {
++      const saved = await persistCanonicalAlbum({ ...item, starred: true }, { silent });
++      if (saved) setAlbums(prev => prev.map(album => album.id === item.id ? { ...album, starred: true } : album));
++      return saved;
++    }
+     const ai = item.ai || item.data || {};
+     const entry = {
+       id: item.id, type: isSong ? 'song' : 'album',
+@@ -5946,7 +6167,7 @@ function App() {
+     setAlbums(prev => prev.map(a => a.id === item.id ? { ...a, starred: true } : a));
+ 
+     if (!pat) {
+-      pushToast(`⭐ 已在本机收藏「${entry.title}」；如需跨设备，可在设置中开启 GitHub 同步。`);
++      if (!silent) pushToast(`⭐ 已在本机收藏「${entry.title}」；如需跨设备，可在设置中开启 GitHub 同步。`);
+       return;
+     }
+ 
+@@ -5967,29 +6188,23 @@ function App() {
+       await _writeLibrary(updated, curSha);
+       setLibItems(updated);
+       writeLocalLibrary(updated);
+-      pushToast(`⭐ 已收藏「${entry.title}」并推送到 GitHub`);
++      if (!silent) pushToast(`⭐ 已收藏「${entry.title}」并推送到 GitHub`);
+     } catch (e) {
+-      pushToast(`⭐ 已在本机收藏「${entry.title}」；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 });
++      if (!silent) pushToast(`⭐ 已在本机收藏「${entry.title}」；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 });
+     }
+   }
+   async function removeFromLibrary(id) {
+     const updated = libItems.filter(x => x.id !== id);
+-    writeLocalLibrary(updated);
+-    setLibItems(updated);
++    setCanonicalLibraryItems(updated);
+     setSongs(prev => prev.map(s => s.id === id ? { ...s, starred: false } : s));
+-    setAlbums(prev => prev.map(a => a.id === id ? { ...a, starred: false } : a));
+     if (!safeLS.get('github_pat')) { pushToast('已从本机曲库移除'); return; }
+-    try {
+-      await _writeLibrary(updated, libSha);
+-      pushToast('已从本机与 GitHub 曲库移除');
+-    } catch (e) { pushToast(`已从本机曲库移除；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 }); }
++    await syncCanonicalLibraryToGitHub({ successMessage: '已从本机与 GitHub 曲库移除' });
+   }
+   async function setPublishedAt(id, date) {
+     const updated = libItems.map(x => x.id === id ? { ...x, publishedAt: date } : x);
+-    writeLocalLibrary(updated); setLibItems(updated);
++    setCanonicalLibraryItems(updated);
+     if (!safeLS.get('github_pat')) return;
+-    try { await _writeLibrary(updated, libSha); }
+-    catch (e) { pushToast(`发布日期已保存在本机；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 }); }
++    await syncCanonicalLibraryToGitHub({ successMessage: '发布日期已同步到 GitHub 曲库' });
+   }
+ 
+   // Prompt review sync is deliberately separate from the favourites library.
+@@ -6125,22 +6340,25 @@ function App() {
+       } : {}),
+       promptReview: review,
+     } : item));
+-    setAlbums(prev => prev.map(album => {
+-      const tracks = album?.data?.tracks || [];
+-      const index = tracks.findIndex((track, i) => albumTrackPromptId(album.id, i) === subjectId);
+-      if (index < 0) return album;
+-      const nextTracks = tracks.map((track, i) => i !== index ? track : {
+-        ...track,
+-        ...(approvedRecipe ? {
+-          title: approvedRecipe.title,
+-          style: approvedRecipe.style,
+-          exclude: approvedRecipe.exclude,
+-          sunoRecipe: approvedRecipe,
+-        } : {}),
+-        promptReview: review,
+-      });
+-      return { ...album, data: { ...album.data, tracks: nextTracks } };
+-    }));
++    const album = albums.find(candidate => (candidate?.data?.tracks || [])
++      .some((track, index) => albumTrackPromptId(candidate.id, index) === subjectId));
++    if (!album) return;
++    const tracks = album.data.tracks || [];
++    const nextTracks = tracks.map((track, index) => albumTrackPromptId(album.id, index) !== subjectId ? track : {
++      ...track,
++      ...(approvedRecipe ? {
++        title: approvedRecipe.title,
++        style: approvedRecipe.style,
++        exclude: approvedRecipe.exclude,
++        sunoRecipe: approvedRecipe,
++      } : {}),
++      promptReview: review,
++    });
++    const updatedAlbum = { ...album, data: { ...album.data, tracks: nextTracks }, starred: true };
++    setAlbums(prev => prev.map(candidate => candidate.id === album.id ? updatedAlbum : candidate));
++    // Review results are part of the album snapshot, so the same revised
++    // prompt appears after a cloud reload as well as in the ☆ library.
++    void persistCanonicalAlbum(updatedAlbum, { silent: true });
+   }
+ 
+   function editReviewedPrompt(subjectId, patch) {
+@@ -7158,9 +7376,28 @@ Calm, warm, instrumental, no vocals.`;
+       const completedAt = new Date().toLocaleString('zh-CN', {
+         year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+       });
+-      setAlbums((prev) => prev.map((x) => x.id === id
+-        ? { ...x, generating: false, data, aiProvider, aiProviderUsed, genTime, createdAt: completedAt }
+-        : x));
++      const current = albums.find(album => album.id === id) || {
++        id,
++        axisLabel: axis?.label || 'Album',
++        base: { ...base },
++        status: 'Draft',
++      };
++      const completedAlbum = {
++        ...current,
++        generating: false,
++        starred: true,
++        data,
++        aiProvider,
++        aiProviderUsed,
++        genTime,
++        createdAt: completedAt,
++      };
++      setAlbums((prev) => prev.map((x) => x.id === id ? completedAlbum : x));
++      // Newly generated albums are saved as canonical records immediately.
++      // This is intentionally fire-and-forget: generating music prompts never
++      // waits for a network round trip, while the local snapshot is already
++      // available if GitHub is temporarily unreachable.
++      void persistCanonicalAlbum(completedAlbum, { silent: true });
+       setBusy(false);
+     }
+   }
+@@ -7195,18 +7432,39 @@ Calm, warm, instrumental, no vocals.`;
+     window.scrollTo({ top: 0, behavior: 'smooth' });
+   }
+   function setAlbumStatus(id, status) {
+-    setAlbums((prev) => prev.map((a) => {
+-      if (a.id !== id) return a;
+-      if (status === 'Published' && !a.releaseId) {
+-        const rid = 'ALB-' + String(albumPubSeq).padStart(3, '0');
+-        setAlbumPubSeq(n => n + 1);
+-        return { ...a, status, releaseId: rid };
+-      }
+-      return { ...a, status };
+-    }));
++    const album = albums.find(item => item.id === id);
++    if (!album) return;
++    let updatedAlbum = { ...album, status, starred: true };
++    if (status === 'Published' && !album.releaseId) {
++      updatedAlbum.releaseId = 'ALB-' + String(albumPubSeq).padStart(3, '0');
++      setAlbumPubSeq(n => n + 1);
++    }
++    setAlbums(prev => prev.map(item => item.id === id ? updatedAlbum : item));
++    const statusLabels = { Draft: '草稿', Approved: '已采用', Queued: '排队中', Published: '已发布' };
++    void persistCanonicalAlbum(updatedAlbum, {
++      successMessage: `专辑状态“${statusLabels[status] || status}”已同步到 GitHub 曲库`,
++    });
++  }
++  function setPinAlbum(id) {
++    const album = albums.find(item => item.id === id);
++    if (!album) return;
++    const updatedAlbum = { ...album, pinned: !album.pinned, starred: true };
++    setAlbums(prev => prev.map(item => item.id === id ? updatedAlbum : item));
++    void persistCanonicalAlbum(updatedAlbum, { silent: true });
++  }
++  function removeAlbum(id) {
++    const album = albums.find(item => item.id === id);
++    if (album?.pinned) { pushToast('已固定的专辑不会被移除。请先取消固定。', { kind: 'warn' }); return; }
++    void removeFromLibrary(id);
++  }
++  function clearAlbumShelf() {
++    const removeIds = new Set(albums.filter(album => !album.pinned).map(album => album.id));
++    if (!removeIds.size) return;
++    const updated = libItems.filter(item => !removeIds.has(item.id));
++    setCanonicalLibraryItems(updated);
++    if (!safeLS.get('github_pat')) return;
++    void syncCanonicalLibraryToGitHub({ successMessage: '已从 GitHub 曲库移除未固定专辑' });
+   }
+-  function setPinAlbum(id) {setAlbums((prev) => prev.map((a) => a.id === id ? { ...a, pinned: !a.pinned } : a));}
+-  function removeAlbum(id) {setAlbums((prev) => prev.filter((a) => a.pinned || a.id !== id));}
+ 
+   const showLock = mode === 'shuffle';
+   const sampleRef = A.REFERENCE;
+@@ -7377,7 +7635,7 @@ Calm, warm, instrumental, no vocals.`;
+           <div className="feed-head">
+             <span className="feed-title">{T('albumShelf')}</span>
+             {albums.length > 0 &&
+-          <button type="button" className="feed-clear" onClick={() => setAlbums((prev) => prev.filter((a) => a.pinned))}>{T('clearAll')}</button>
++          <button type="button" className="feed-clear" onClick={clearAlbumShelf}>{T('clearAll')}</button>
+           }
+           </div>
+           {albums.length === 0 ?

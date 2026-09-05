@@ -7,6 +7,7 @@ and only forwards to HTTPS endpoints or loopback HTTP endpoints.
 """
 
 import argparse
+import hashlib
 import functools
 import json
 import os
@@ -16,7 +17,12 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
+SERVER_ROOT = os.path.dirname(os.path.abspath(__file__))
+with open(__file__, "rb") as source_file:
+    SERVER_REVISION = hashlib.sha256(source_file.read()).hexdigest()[:16]
+
 MAX_REQUEST_BYTES = 2 * 1024 * 1024
+MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 UPSTREAM_TIMEOUT_SECONDS = 180
 
 
@@ -39,6 +45,24 @@ class AwenHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def _json_response(self, status, payload):
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path.rstrip("/") == "/api/health":
+            # Deliberately contains no provider configuration, token, browser
+            # storage, or user content. It proves which local server answered.
+            self._json_response(200, {"ok": True, "service": "awen-local", "apiProxy": "/api/llm",
+                "pid": os.getpid(), "projectRoot": SERVER_ROOT, "serverRevision": SERVER_REVISION})
+            return
+        super().do_GET()
 
     def do_POST(self):
         if self.path.rstrip("/") != "/api/llm":
@@ -94,17 +118,24 @@ class AwenHandler(SimpleHTTPRequestHandler):
         try:
             with urlopen(upstream_request, timeout=UPSTREAM_TIMEOUT_SECONDS) as response:
                 status = response.status
-                body = response.read(MAX_REQUEST_BYTES)
+                body = response.read(MAX_RESPONSE_BYTES + 1)
                 content_type = response.headers.get("Content-Type", "application/json")
         except HTTPError as error:
             status = error.code
-            body = error.read(MAX_REQUEST_BYTES)
+            body = error.read(MAX_RESPONSE_BYTES + 1)
             content_type = error.headers.get("Content-Type", "application/json")
         except URLError as error:
             self._json_error(502, f"Upstream connection failed: {error.reason}")
             return
         except TimeoutError:
             self._json_error(504, "Upstream request timed out")
+            return
+
+        # Returning the first N bytes produces a syntactically incomplete
+        # provider response, then the browser falsely reports "no JSON".  A
+        # clear error is recoverable; a truncated success payload is not.
+        if len(body) > MAX_RESPONSE_BYTES:
+            self._json_error(502, "Upstream response is too large; it was not forwarded partially")
             return
 
         self.send_response(status)

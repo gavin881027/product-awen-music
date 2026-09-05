@@ -1,0 +1,23 @@
+{
+  "scope": "remote read only; browser PAT not inspected",
+  "libraryCount": 22,
+  "types": {
+    "album": 14,
+    "song": 8
+  },
+  "duplicateLibraryIds": [],
+  "manifestCount": 346,
+  "statusCounts": {
+    "in_review": 264,
+    "approved": 44,
+    "needs_revision": 28,
+    "reject": 2,
+    "applied_to_suno": 8
+  },
+  "missingReferences": [],
+  "treeTruncated": false,
+  "duplicateManifestKeys": [],
+  "checkedReferencedContents": 503,
+  "sourceHashMismatches": [],
+  "reviewSnapshotCommit": "954fdae7521a3bfd5dc8494ed56918e642555291"
+}

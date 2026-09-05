@@ -40,6 +40,12 @@ echo "按 Ctrl+C 停止服务器"
 echo "========================================="
 echo ""
 
+# Refuse a silent origin change and identify an existing listener.
+if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    python3 "$PROJECT_DIR/check_server.py" --port "$PORT"
+    exit $?
+fi
+
 # 启动服务器
 cd "$PROJECT_DIR"
 python3 server.py --port "$PORT"

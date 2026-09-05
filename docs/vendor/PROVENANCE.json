@@ -1,0 +1,17 @@
+[
+  {
+    "file": "react.production.min.js",
+    "source": "https://unpkg.com/react@18.3.1/umd/react.production.min.js",
+    "sha384": "DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z"
+  },
+  {
+    "file": "react-dom.production.min.js",
+    "source": "https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js",
+    "sha384": "gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1"
+  },
+  {
+    "file": "babel.min.js",
+    "source": "https://unpkg.com/@babel/standalone@7.29.0/babel.min.js",
+    "sha384": "m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y"
+  }
+]

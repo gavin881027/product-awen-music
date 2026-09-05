@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 build.py — inline all local src/*.js and src/*.jsx into docs/index.html
-Run: python3 build.py
+Run: python3 build.py (legacy preview only; never overwrites the active app)
 """
 import os, re
 
 SRC_DIR = os.path.join(os.path.dirname(__file__), 'src')
 ENTRY   = os.path.join(SRC_DIR, 'Awen Study Matrix.html')
-OUT     = os.path.join(os.path.dirname(__file__), 'docs', 'index.html')
+OUT     = os.path.join(os.path.dirname(__file__), 'legacy-build', 'index.html')
 
 with open(ENTRY, encoding='utf-8') as f:
     html = f.read()
