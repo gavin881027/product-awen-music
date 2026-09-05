@@ -7,19 +7,42 @@ const browser = await chromium.launch({ headless: true, ...(process.env.AWEN_BRO
 try {
   const context = await browser.newContext();
   await context.route('https://**', r => r.abort());
-  await context.addInitScript(() => localStorage.setItem('awen_guide_seen_v1', '1'));
+  await context.addInitScript(() => {
+    localStorage.setItem('awen_guide_seen_v1', '1');
+    localStorage.setItem('awen_ai_provider_v1', JSON.stringify({
+      preset: 'deepseek-official-v4-flash', label: 'DeepSeek 官方 · V4 Flash',
+      protocol: 'responses', baseUrl: 'https://api.deepseek.com',
+      model: 'deepseek-v4-flash', apiKey: 'test-only-key'
+    }));
+  });
   let writes = 0;
   await context.route('https://api.github.com/**', route => {
     if (route.request().method() !== 'GET') writes++;
     return route.fulfill({ status: 503, contentType: 'application/json', body: '{"message":"isolated outage"}' });
   });
-  await context.route('**/api/llm', route => route.abort());
+  let providerPosts = 0;
+  await context.route('**/api/llm', route => {
+    providerPosts++;
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ output_text: '{"ok":true}' }) });
+  });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.goto('http://127.0.0.1:8000/');
   await page.getByRole('button', { name: 'Album', exact: true }).waitFor({ timeout: 60000 });
   await page.getByRole('button', { name: 'Album', exact: true }).click();
+  // The settings test sends the exact minimal provider probe through the
+  // actual local proxy route. The isolated route above returns a fixed JSON.
+  await page.getByRole('button', { name: '⚙', exact: true }).click();
+  await page.getByRole('button', { name: '测试 Provider 连接', exact: true }).click();
+  try {
+    await page.getByText('连接成功：DeepSeek 官方 · V4 Flash').waitFor();
+  } catch (error) {
+    const messages = await page.locator('.settings-error, .settings-stored').allTextContents();
+    throw new Error(`Provider test did not confirm success: ${messages.join(' | ')}`);
+  }
+  assert.equal(providerPosts, 1, 'The Provider test sends exactly one probe');
+  await page.getByRole('button', { name: '×', exact: true }).first().click();
   // Seed test-only local storage using the app's actual template engine.
   await page.evaluate(() => {
     const built = window.AWEN.buildAlbum('day', window.AWEN.DEFAULTS, 3);

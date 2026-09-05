@@ -5300,7 +5300,7 @@ function TokenModal({ open, onSubmit, onCancel, providerLabel }) {
 }
 
 /* ========== SETTINGS MODAL ========== */
-function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDefaultsSaved }) {
+function SettingsModal({ open, onClose, onProviderSaved, onTestProvider, sunoDefaults, onSunoDefaultsSaved }) {
   const [providerId, setProviderId] = React.useState('mimo');
   const [providerLabel, setProviderLabel] = React.useState('MiMo');
   const [protocol, setProtocol] = React.useState('chat-completions');
@@ -5308,6 +5308,7 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
   const [model, setModel] = React.useState('');
   const [apiKeyVal, setApiKeyVal] = React.useState('');
   const [providerError, setProviderError] = React.useState('');
+  const [providerTest, setProviderTest] = React.useState({ busy: false, message: '', failed: false });
   const [patVal, setPatVal] = React.useState('');
   const [repoVal, setRepoVal] = React.useState(GH_REPO_DEFAULT);
   const [patError, setPatError] = React.useState('');
@@ -5330,6 +5331,7 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
     setModel(cfg.model || '');
     setApiKeyVal('');
     setProviderError('');
+    setProviderTest({ busy: false, message: '', failed: false });
     setRepoVal(localStorage.getItem('github_repo') || GH_REPO_DEFAULT);
     setPatError('');
     setReviewRepoVal(localStorage.getItem('prompt_review_github_repo') || PROMPT_REVIEW_REPO_DEFAULT);
@@ -5398,6 +5400,16 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
     const cfg = saveAIProviderConfig({ ...loadAIProviderConfig(), apiKey: '' });
     setApiKeyVal('');
     if (onProviderSaved) onProviderSaved(cfg);
+  }
+  async function testProviderConnection() {
+    if (!onTestProvider || providerTest.busy) return;
+    setProviderTest({ busy: true, message: '正在发送最小测试请求…', failed: false });
+    try {
+      const label = await onTestProvider();
+      setProviderTest({ busy: false, message: `连接成功：${label}`, failed: false });
+    } catch (error) {
+      setProviderTest({ busy: false, message: `连接失败：${error?.message || error}`, failed: true });
+    }
   }
   function savePat() {
     const repo = normalizeGitHubRepo(repoVal);
@@ -5502,8 +5514,10 @@ function SettingsModal({ open, onClose, onProviderSaved, sunoDefaults, onSunoDef
               {providerError && <div className="settings-error">{providerError}</div>}
               <div className="settings-actions">
                 <button className="settings-save-btn" onClick={saveProvider}>保存 Provider 配置</button>
+                {currentProvider.apiKey && <button className="settings-save-btn" disabled={providerTest.busy} onClick={testProviderConnection}>{providerTest.busy ? '正在测试…' : '测试 Provider 连接'}</button>}
                 {currentProvider.apiKey && <button className="settings-clear-btn" onClick={clearProviderKey}>清除当前 Key</button>}
               </div>
+              {providerTest.message && <div className={providerTest.failed ? 'settings-error' : 'settings-stored'}>{providerTest.message}</div>}
               <p className="settings-note">
                 本地启动器会通过 <b>127.0.0.1</b> 代理请求，解决多数 API 的浏览器 CORS 限制；
                 Key 只存于当前浏览器，并仅在生成时转发给你选择的 Provider。
@@ -8037,10 +8051,19 @@ Calm, warm, instrumental, no vocals.`;
   const showLock = mode === 'shuffle';
   const sampleRef = A.REFERENCE;
 
+  async function testProviderConnection() {
+    const completed = await complete('Return exactly this minified JSON and nothing else: {"ok":true}');
+    let parsed;
+    try { parsed = JSON.parse(completed.text.trim()); } catch (error) { throw new Error('Provider 未返回预期的最小 JSON。'); }
+    if (parsed?.ok !== true) throw new Error('Provider 未返回预期的最小 JSON。');
+    return completed.providerLabel;
+  }
+
   return (
     <div className="app" data-theme={t.theme} data-density={t.density} data-mode={mode}>
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)}
         onProviderSaved={(cfg) => { setProviderConfig(cfg); setHasKey(!!cfg.apiKey); }}
+        onTestProvider={testProviderConnection}
         sunoDefaults={sunoDefaults} onSunoDefaultsSaved={setSunoDefaults} />
       <TokenModal open={tokenModalOpen}
         providerLabel={providerConfig.label}
