@@ -3153,23 +3153,46 @@ function buildSunoRecipe(suno, title, workspace, defaults) {
 function attachSongSunoRecipe(ai, defaults, workspace = 'Awen · Singles') {
   if (!ai) return ai;
   const suno = ai.suno || {};
-  return { ...ai, suno: { ...suno, recipe: buildSunoRecipe(suno, ai.title, workspace, defaults) } };
+  const fallback = {
+    lyrics: suno.lyrics || suno.structure || '',
+    style: suno.style || '',
+    exclude: suno.exclude || SUNO_EXCLUDE_DEFAULT,
+    title: ai.title || '',
+    workspace,
+  };
+  // A saved recipe is authoritative. It can contain review-approved route,
+  // structure, duration and other fields that do not exist on the older suno
+  // object. Only use the legacy fields to fill a genuinely missing recipe.
+  const recipe = suno.recipe
+    ? normalizeSunoRecipe({ ...fallback, ...suno.recipe }, fallback)
+    : buildSunoRecipe(suno, ai.title, workspace, defaults);
+  return { ...ai, suno: { ...suno, recipe } };
 }
 function attachAlbumSunoRecipes(data, defaults) {
   if (!data) return data;
-  const workspace = `Awen · ${data.album || 'Untitled Album'}`;
-  const tracks = (data.tracks || []).map(tr => ({
-    ...tr,
-    // New album tracks deliberately start outside the review workflow. Keeping
-    // the explicit null makes the initial "ChatGPT 审核 · 尚未提交" state
-    // durable when the album is later saved to the local/GitHub library.
-    promptReview: tr.promptReview || null,
-    sunoRecipe: buildSunoRecipe({
-      lyrics: tr.lyrics,
-      style: tr.style || data.anchor,
+  const workspace = data.workspace || `Awen · ${data.album || 'Untitled Album'}`;
+  const tracks = (data.tracks || []).map(tr => {
+    const fallback = {
+      lyrics: tr.lyrics || '',
+      style: tr.style || data.anchor || '',
       exclude: tr.exclude || SUNO_EXCLUDE_DEFAULT,
-    }, tr.title, workspace, defaults),
-  }));
+      title: tr.title || '',
+      workspace,
+    };
+    // Do not rebuild a persisted recipe on load: review and manual edits live
+    // there, while tr.lyrics/style are only legacy fallbacks.
+    const sunoRecipe = tr.sunoRecipe
+      ? normalizeSunoRecipe({ ...fallback, ...tr.sunoRecipe }, fallback)
+      : buildSunoRecipe(fallback, tr.title, workspace, defaults);
+    return {
+      ...tr,
+      // New album tracks deliberately start outside the review workflow. Keeping
+      // the explicit null makes the initial "ChatGPT 审核 · 尚未提交" state
+      // durable when the album is later saved to the local/GitHub library.
+      promptReview: tr.promptReview || null,
+      sunoRecipe,
+    };
+  });
   return { ...data, workspace, tracks };
 }
 function sunoRecipeChecklist(recipe, route) {
@@ -3284,7 +3307,7 @@ function LibCard({ item, onRemove, onSetPublished }) {
         </div>
         <div className="card-headR">
           <button type="button" className="icon-btn" title="从曲库移除"
-            onClick={() => { if (window.confirm('确认从曲库移除「' + item.title + '」？')) onRemove(item.id); }}>×</button>
+            onClick={() => { if (window.confirm('确认从曲库移除「' + item.title + '」？')) onRemove(item.syncId || item.id); }}>×</button>
         </div>
       </div>
       <div className="card-title">{item.title}</div>
@@ -3325,7 +3348,7 @@ function LibCard({ item, onRemove, onSetPublished }) {
               defaultValue={new Date().toISOString().slice(0, 10)} />
             <button className="lib-pub-confirm" onClick={() => {
               const v = document.getElementById(pubInputId)?.value;
-              if (v) onSetPublished(item.id, v);
+              if (v) onSetPublished(item.syncId || item.id, v);
               setMarkingPub(false);
             }}>确认</button>
             <button className="lib-pub-cancel" onClick={() => setMarkingPub(false)}>取消</button>
@@ -5688,14 +5711,75 @@ function App() {
     del(k){ try { localStorage.removeItem(k); } catch(e) {} },
   };
 
-  // GitHub library helpers
+  // GitHub library helpers. Version 3 retains the legacy `songs` array for
+  // older clients, but gives every item a stable syncId and records deletes as
+  // tombstones so equal display IDs from different devices cannot overwrite
+  // each other or silently reappear after an offline delete.
   const LOCAL_LIB_KEY = 'awen_local_library_v1';
   const GH_LIB_PATH = 'docs/library.json';
+  const LIBRARY_SCHEMA_VERSION = 3;
+  const libTombstonesRef = React.useRef([]);
   function getGitHubRepo() {
     return normalizeGitHubRepo(safeLS.get('github_repo')) || GH_REPO_DEFAULT;
   }
+  function libraryLegacySyncId(item) {
+    const basis = JSON.stringify({
+      id: String(item?.id || ''), type: String(item?.type || (item?.sel ? 'song' : 'album')),
+      title: String(item?.title || ''), createdAt: String(item?.createdAt || ''),
+    });
+    return `legacy-${reviewHash(basis)}`;
+  }
+  function createLibrarySyncId() {
+    if (window.crypto?.randomUUID) return `lib-${window.crypto.randomUUID()}`;
+    return `lib-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  }
+  function librarySyncId(item) {
+    return String(item?.syncId || libraryLegacySyncId(item));
+  }
+  function libraryUpdatedAt(item) {
+    return String(item?.updatedAt || item?.savedAt || item?.createdAt || '');
+  }
+  function normalizeLibraryItem(item) {
+    if (!item || !item.id) return null;
+    return { ...item, syncId: librarySyncId(item), updatedAt: libraryUpdatedAt(item) };
+  }
+  function normalizeLibraryTombstone(value) {
+    if (!value?.syncId) return null;
+    return { syncId: String(value.syncId), deletedAt: String(value.deletedAt || '') };
+  }
+  function normalizeLibraryDocument(value) {
+    const raw = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    const songs = Array.isArray(raw.songs) ? raw.songs.map(normalizeLibraryItem).filter(Boolean) : [];
+    const tombstones = Array.isArray(raw.tombstones) ? raw.tombstones.map(normalizeLibraryTombstone).filter(Boolean) : [];
+    return { version: LIBRARY_SCHEMA_VERSION, songs, tombstones };
+  }
+  function mergeLibraryDocuments(remoteValue, localValue) {
+    const remote = normalizeLibraryDocument(remoteValue);
+    const local = normalizeLibraryDocument(localValue);
+    const items = new Map();
+    [...remote.songs, ...local.songs].forEach(item => {
+      const key = librarySyncId(item);
+      const previous = items.get(key);
+      if (!previous || libraryUpdatedAt(item) >= libraryUpdatedAt(previous)) items.set(key, item);
+    });
+    const tombstones = new Map();
+    [...remote.tombstones, ...local.tombstones].forEach(tombstone => {
+      const previous = tombstones.get(tombstone.syncId);
+      if (!previous || tombstone.deletedAt >= previous.deletedAt) tombstones.set(tombstone.syncId, tombstone);
+    });
+    const active = [...items.values()].filter(item => {
+      const deletedAt = tombstones.get(librarySyncId(item))?.deletedAt || '';
+      return !deletedAt || libraryUpdatedAt(item) > deletedAt;
+    });
+    return {
+      version: LIBRARY_SCHEMA_VERSION,
+      songs: active.sort((a, b) => libraryUpdatedAt(b).localeCompare(libraryUpdatedAt(a))),
+      tombstones: [...tombstones.values()].sort((a, b) => b.deletedAt.localeCompare(a.deletedAt)),
+    };
+  }
   function hydrateLibraryItem(item) {
-    if (!item || !item.id) return item;
+    item = normalizeLibraryItem(item);
+    if (!item) return item;
     if (item.type === 'song' || item.sel) {
       let recipe = item.sunoRecipe;
       if (!recipe && item.sel) {
@@ -5713,21 +5797,18 @@ function App() {
       : [];
     return { ...item, type: 'album', workspace, sunoRecipes: recipes };
   }
-  function readLocalLibrary() {
-    try {
-      const parsed = JSON.parse(safeLS.get(LOCAL_LIB_KEY) || 'null');
-      return Array.isArray(parsed?.songs) ? parsed.songs.map(hydrateLibraryItem).filter(Boolean) : [];
-    } catch (e) { return []; }
+  function readLocalLibraryDocument() {
+    try { return normalizeLibraryDocument(JSON.parse(safeLS.get(LOCAL_LIB_KEY) || 'null')); }
+    catch (e) { return normalizeLibraryDocument(null); }
   }
-  function writeLocalLibrary(items) {
-    return safeLS.set(LOCAL_LIB_KEY, JSON.stringify({ version: 2, songs: items.map(hydrateLibraryItem) }));
+  function readLocalLibrary() { return readLocalLibraryDocument().songs.map(hydrateLibraryItem).filter(Boolean); }
+  function writeLocalLibrary(items, tombstones = libTombstonesRef.current) {
+    const doc = normalizeLibraryDocument({ songs: items.map(hydrateLibraryItem), tombstones });
+    libTombstonesRef.current = doc.tombstones;
+    return safeLS.set(LOCAL_LIB_KEY, JSON.stringify(doc));
   }
   function mergeLibraryItems(remoteItems, localItems) {
-    const merged = new Map();
-    [...(remoteItems || []), ...(localItems || [])].forEach(item => {
-      if (item?.id) merged.set(item.id, item);
-    });
-    return [...merged.values()].sort((a, b) => String(b.savedAt || '').localeCompare(String(a.savedAt || '')));
+    return mergeLibraryDocuments({ songs: remoteItems, tombstones: [] }, { songs: localItems, tombstones: [] }).songs;
   }
   function githubSyncMessage(error) {
     const repo = getGitHubRepo();
@@ -5754,28 +5835,92 @@ function App() {
     }
     return res.json();
   }
-  async function loadLibrary() {
-    setLibLoading(true); setLibError(null);
-    const localItems = readLocalLibrary();
-    setLibItems(localItems);
-    if (!safeLS.get('github_pat')) { setLibLoading(false); return; }
+  const librarySyncQueueRef = React.useRef(Promise.resolve());
+  function isLibraryWriteConflict(error) {
+    // GitHub Contents API commonly uses 409, and some gateways surface the
+    // stale-SHA equivalent as 422. Both are safe to re-read and retry.
+    return error?.status === 409 || error?.status === 422;
+  }
+  function enqueueLibrarySync(work) {
+    const queued = librarySyncQueueRef.current.catch(() => {}).then(work);
+    librarySyncQueueRef.current = queued;
+    return queued;
+  }
+  function decodeGitHubContent(data) {
+    if (!data || typeof data.content !== 'string' || !data.content.trim()) {
+      throw new Error('GitHub 文件内容为空或格式无效');
+    }
+    return fromBase64Utf8(data.content);
+  }
+  function parseLibraryDocument(text) {
+    const parsed = JSON.parse(String(text || ''));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.songs)) {
+      throw new Error('GitHub 曲库格式无效：需要包含 songs 数组的 JSON 对象');
+    }
+    return normalizeLibraryDocument(parsed);
+  }
+  function libraryDocumentFromGitHub(data) { return parseLibraryDocument(decodeGitHubContent(data)); }
+  function libraryItemsFromGitHub(data) { return libraryDocumentFromGitHub(data).songs.map(hydrateLibraryItem).filter(Boolean); }
+  async function readRemoteLibraryDocument() {
     try {
       const data = await ghFetch('GET', `https://api.github.com/repos/${getGitHubRepo()}/contents/${GH_LIB_PATH}`);
-      const parsed = JSON.parse(atob(data.content.replace(/\n/g, '')));
-      const merged = mergeLibraryItems((parsed.songs || []).map(hydrateLibraryItem), localItems);
-      setLibItems(merged); writeLocalLibrary(merged); setLibSha(data.sha);
+      return { sha: data.sha || null, document: libraryDocumentFromGitHub(data) };
+    } catch (error) {
+      if (error.status === 404) return { sha: null, document: normalizeLibraryDocument(null) };
+      throw error;
+    }
+  }
+  async function putLibraryDocument(document, sha) {
+    const clean = normalizeLibraryDocument(document);
+    const json = JSON.stringify(clean, null, 2);
+    const content = toBase64Utf8(json);
+    const res = await ghFetch('PUT', `https://api.github.com/repos/${getGitHubRepo()}/contents/${GH_LIB_PATH}`,
+      { message: `sync library (${clean.songs.length} active, ${clean.tombstones.length} deleted)`, content, ...(sha ? { sha } : {}) });
+    return { sha: res.content?.sha || null, document: clean };
+  }
+  async function syncLibraryDocument(localDocument) {
+    const local = normalizeLibraryDocument(localDocument);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const remote = await readRemoteLibraryDocument();
+      const merged = mergeLibraryDocuments(remote.document, local);
+      try {
+        const written = await putLibraryDocument(merged, remote.sha);
+        setLibSha(written.sha);
+        return written.document;
+      } catch (error) {
+        if (!isLibraryWriteConflict(error) || attempt === 2) throw error;
+        await new Promise(resolve => setTimeout(resolve, 180 * (attempt + 1)));
+      }
+    }
+    throw new Error('曲库同步未完成');
+  }
+  async function loadLibrary() {
+    setLibLoading(true); setLibError(null);
+    const localDocument = readLocalLibraryDocument();
+    const localItems = localDocument.songs.map(hydrateLibraryItem).filter(Boolean);
+    setLibItems(localItems);
+    libTombstonesRef.current = localDocument.tombstones;
+    if (!safeLS.get('github_pat')) { setLibLoading(false); return; }
+    try {
+      const remote = await readRemoteLibraryDocument();
+      const merged = mergeLibraryDocuments(remote.document, localDocument);
+      const items = merged.songs.map(hydrateLibraryItem).filter(Boolean);
+      setLibItems(items); writeLocalLibrary(items, merged.tombstones); setLibSha(remote.sha);
     } catch (e) {
-      if (e.status === 404) { setLibItems(localItems); setLibSha(null); }
-      else { setLibItems(localItems); setLibError(`GitHub 同步失败，当前显示本地收藏。${githubSyncMessage(e)}`); }
+      setLibItems(localItems);
+      setLibError(`GitHub 同步失败，当前显示本地收藏。${githubSyncMessage(e)}`);
     }
     setLibLoading(false);
   }
-  async function _writeLibrary(items, sha) {
-    const json = JSON.stringify({ version: 2, songs: items.map(hydrateLibraryItem) }, null, 2);
-    const content = btoa(unescape(encodeURIComponent(json)));
-    const res = await ghFetch('PUT', `https://api.github.com/repos/${getGitHubRepo()}/contents/${GH_LIB_PATH}`,
-      { message: `update library (${items.length} items)`, content, ...(sha ? { sha } : {}) });
-    setLibSha(res.content.sha);
+  async function _writeLibrary(items, sha, tombstones = libTombstonesRef.current) {
+    // Compatibility wrapper for cover/update callers. Ignore a caller's cached
+    // SHA and re-read in the queue so every library mutation shares the same
+    // conflict-aware merge protocol.
+    const document = normalizeLibraryDocument({ songs: items, tombstones });
+    const synced = await enqueueLibrarySync(() => syncLibraryDocument(document));
+    const hydrated = synced.songs.map(hydrateLibraryItem).filter(Boolean);
+    writeLocalLibrary(hydrated, synced.tombstones);
+    return synced;
   }
   function libraryCoverAsset(asset) {
     if (!asset?.path) return null;
@@ -5879,7 +6024,7 @@ function App() {
         let remoteItems = [], currentLibrarySha = null;
         try {
           const remote = await ghFetch('GET', `https://api.github.com/repos/${repo}/contents/${GH_LIB_PATH}`);
-          const parsed = JSON.parse(atob(remote.content.replace(/\n/g, '')));
+          const parsed = parseLibraryDocument(decodeGitHubContent(remote));
           remoteItems = parsed.songs || [];
           currentLibrarySha = remote.sha;
         } catch (error) {
@@ -5901,17 +6046,26 @@ function App() {
     const pat = safeLS.get('github_pat');
     const isSong = !!item.sel;
     const ai = item.ai || item.data || {};
+    const title = ai.title || (item.data?.tracks?.[0]?.title) || item.id;
+    const localDocument = readLocalLibraryDocument();
+    // Re-starring the same current card updates its existing sync record; a
+    // different device can keep the same display ID because it has a distinct
+    // syncId.
+    const existing = localDocument.songs.find(row => row.id === item.id && row.title === title);
+    const now = new Date().toISOString();
     const entry = {
+      syncId: existing?.syncId || createLibrarySyncId(),
       id: item.id, type: isSong ? 'song' : 'album',
-      title: ai.title || (item.data?.tracks?.[0]?.title) || item.id,
+      title,
       tagline: ai.tagline || item.axisLabel || '',
       sel: item.sel || null,
       genTime: item.genTime || null,
       aiProvider: item.aiProvider || null,
       aiProviderUsed: item.aiProviderUsed !== false,
-      createdAt: item.createdAt || null,
+      createdAt: existing?.createdAt || item.createdAt || null,
       savedAt: new Date().toLocaleString('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }),
-      publishedAt: null,
+      updatedAt: now,
+      publishedAt: existing?.publishedAt || null,
       coverAsset: libraryCoverAsset(item.coverAsset),
       ...(isSong ? {
         sunoRecipe: normalizeSunoRecipe(item.ai?.suno?.recipe, {
@@ -5932,64 +6086,64 @@ function App() {
         })),
       }),
     };
-    const localItems = readLocalLibrary();
-    const localIdx = localItems.findIndex(x => x.id === item.id);
-    const localUpdated = localIdx >= 0
-      ? localItems.map((x, i) => i === localIdx ? { ...x, ...entry } : x)
-      : [entry, ...localItems];
-    if (!writeLocalLibrary(localUpdated)) {
+    const localUpdated = existing
+      ? localDocument.songs.map(row => librarySyncId(row) === entry.syncId ? entry : row)
+      : [entry, ...localDocument.songs];
+    const localNext = normalizeLibraryDocument({ songs: localUpdated, tombstones: localDocument.tombstones.filter(row => row.syncId !== entry.syncId) });
+    if (!writeLocalLibrary(localNext.songs, localNext.tombstones)) {
       pushToast('本地收藏失败：浏览器存储不可用或空间不足。', { kind: 'error' });
       return;
     }
-    setLibItems(prev => mergeLibraryItems(prev, localUpdated));
+    setLibItems(localNext.songs.map(hydrateLibraryItem));
     setSongs(prev => prev.map(s => s.id === item.id ? { ...s, starred: true } : s));
     setAlbums(prev => prev.map(a => a.id === item.id ? { ...a, starred: true } : a));
-
     if (!pat) {
       pushToast(`⭐ 已在本机收藏「${entry.title}」；如需跨设备，可在设置中开启 GitHub 同步。`);
       return;
     }
-
-    // Always read the latest SHA, then merge local and remote favourites.
-    let remoteItems = [], curSha = null;
     try {
-      const data = await ghFetch('GET', `https://api.github.com/repos/${getGitHubRepo()}/contents/${GH_LIB_PATH}`);
-      const parsed = JSON.parse(atob(data.content.replace(/\n/g, '')));
-      remoteItems = parsed.songs || []; curSha = data.sha;
-    } catch (e) {
-      if (e.status !== 404) {
-        pushToast(`⭐ 已在本机收藏「${entry.title}」；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 });
-        return;
-      }
-    }
-    const updated = mergeLibraryItems(remoteItems, localUpdated);
-    try {
-      await _writeLibrary(updated, curSha);
-      setLibItems(updated);
-      writeLocalLibrary(updated);
+      const synced = await enqueueLibrarySync(() => syncLibraryDocument(readLocalLibraryDocument()));
+      const syncedItems = synced.songs.map(hydrateLibraryItem).filter(Boolean);
+      writeLocalLibrary(syncedItems, synced.tombstones); setLibItems(syncedItems);
       pushToast(`⭐ 已收藏「${entry.title}」并推送到 GitHub`);
     } catch (e) {
       pushToast(`⭐ 已在本机收藏「${entry.title}」；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 });
     }
   }
-  async function removeFromLibrary(id) {
-    const updated = libItems.filter(x => x.id !== id);
-    writeLocalLibrary(updated);
-    setLibItems(updated);
-    setSongs(prev => prev.map(s => s.id === id ? { ...s, starred: false } : s));
-    setAlbums(prev => prev.map(a => a.id === id ? { ...a, starred: false } : a));
-    if (!safeLS.get('github_pat')) { pushToast('已从本机曲库移除'); return; }
+  async function removeFromLibrary(syncId) {
+    const localDocument = readLocalLibraryDocument();
+    const target = localDocument.songs.find(item => librarySyncId(item) === syncId);
+    if (!target) return;
+    const deletedAt = new Date().toISOString();
+    const localNext = normalizeLibraryDocument({
+      songs: localDocument.songs.filter(item => librarySyncId(item) !== syncId),
+      tombstones: [...localDocument.tombstones.filter(item => item.syncId !== syncId), { syncId, deletedAt }],
+    });
+    writeLocalLibrary(localNext.songs, localNext.tombstones);
+    setLibItems(localNext.songs.map(hydrateLibraryItem));
+    setSongs(prev => prev.map(s => s.id === target.id ? { ...s, starred: false } : s));
+    setAlbums(prev => prev.map(a => a.id === target.id ? { ...a, starred: false } : a));
+    if (!safeLS.get('github_pat')) { pushToast('已从本机曲库移除（同步恢复后将保留删除记录）。'); return; }
     try {
-      await _writeLibrary(updated, libSha);
+      const synced = await enqueueLibrarySync(() => syncLibraryDocument(readLocalLibraryDocument()));
+      const syncedItems = synced.songs.map(hydrateLibraryItem).filter(Boolean);
+      writeLocalLibrary(syncedItems, synced.tombstones); setLibItems(syncedItems);
       pushToast('已从本机与 GitHub 曲库移除');
     } catch (e) { pushToast(`已从本机曲库移除；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 }); }
   }
-  async function setPublishedAt(id, date) {
-    const updated = libItems.map(x => x.id === id ? { ...x, publishedAt: date } : x);
-    writeLocalLibrary(updated); setLibItems(updated);
+  async function setPublishedAt(syncId, date) {
+    const localDocument = readLocalLibraryDocument();
+    const localNext = normalizeLibraryDocument({
+      songs: localDocument.songs.map(item => librarySyncId(item) === syncId ? { ...item, publishedAt: date, updatedAt: new Date().toISOString() } : item),
+      tombstones: localDocument.tombstones,
+    });
+    writeLocalLibrary(localNext.songs, localNext.tombstones); setLibItems(localNext.songs.map(hydrateLibraryItem));
     if (!safeLS.get('github_pat')) return;
-    try { await _writeLibrary(updated, libSha); }
-    catch (e) { pushToast(`发布日期已保存在本机；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 }); }
+    try {
+      const synced = await enqueueLibrarySync(() => syncLibraryDocument(readLocalLibraryDocument()));
+      const syncedItems = synced.songs.map(hydrateLibraryItem).filter(Boolean);
+      writeLocalLibrary(syncedItems, synced.tombstones); setLibItems(syncedItems);
+    } catch (e) { pushToast(`发布日期已保存在本机；${githubSyncMessage(e)}`, { kind: 'warn', duration: 10000 }); }
   }
 
   // Prompt review sync is deliberately separate from the favourites library.
@@ -6032,12 +6186,40 @@ function App() {
       throw e;
     }
   }
-  async function writeReviewFile(path, text, message, sha) {
-    return reviewGhFetch('PUT', path, {
-      message,
-      content: toBase64Utf8(text),
-      ...(sha ? { sha } : {}),
-    });
+  async function writeReviewFile(path, text, message, sha, options = {}) {
+    const desired = String(text || '');
+    const mutable = !!options.mutable;
+    // Review artifacts are immutable evidence. A retry first reads the path:
+    // identical content means a previous request succeeded after the browser
+    // lost its response, while different content is an explicit conflict rather
+    // than an accidental overwrite of an earlier review round.
+    let current = await readReviewFile(path);
+    if (current?.text === desired) return { skipped: true, sha: current.sha };
+    if (current && !mutable) {
+      const error = new Error(`审核文件已存在且内容不同：${path}`);
+      error.status = 409;
+      throw error;
+    }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await reviewGhFetch('PUT', path, {
+          message,
+          content: toBase64Utf8(desired),
+          ...(current?.sha || sha ? { sha: current?.sha || sha } : {}),
+        });
+      } catch (error) {
+        if (!isGitHubWriteConflict(error) || attempt === 2) throw error;
+        current = await readReviewFile(path);
+        if (current?.text === desired) return { skipped: true, sha: current.sha };
+        if (current && !mutable) {
+          const conflict = new Error(`审核文件已存在且内容不同：${path}`);
+          conflict.status = 409;
+          throw conflict;
+        }
+        await new Promise(resolve => setTimeout(resolve, 180 * (attempt + 1)));
+      }
+    }
+    throw new Error(`审核文件写入未完成：${path}`);
   }
   function isGitHubWriteConflict(error) {
     return error?.status === 409;
@@ -6086,7 +6268,7 @@ function App() {
       const manifest = { version: 1, updatedAt: entry.updatedAt, prompts };
       try {
         await writeReviewFile(REVIEW_MANIFEST_PATH, JSON.stringify(manifest, null, 2) + '\n',
-          `review: update manifest for ${review.id}`, remote.sha);
+          `review: update manifest for ${review.id}`, remote.sha, { mutable: true });
         return;
       } catch (error) {
         if (!isGitHubWriteConflict(error) || attempt === 2) throw error;
@@ -6201,8 +6383,13 @@ function App() {
       : { ...nextDraft, batchAlbumId: options.batchAlbumId || null };
     try {
       const remote = await readReviewFile(review.sourcePath);
-      await writeReviewFile(review.sourcePath, renderReviewDraftMarkdown(review),
-        `review: submit ${review.id} for ChatGPT audit`, remote?.sha);
+      // A source path includes its sourceHash. If it already exists, retain the
+      // immutable remote draft so a retry after a lost response can continue to
+      // the manifest step without rewriting a timestamped Markdown file.
+      if (!remote) {
+        await writeReviewFile(review.sourcePath, renderReviewDraftMarkdown(review),
+          `review: submit ${review.id} for ChatGPT audit`);
+      }
       await upsertReviewManifest(review);
       updatePromptReviewSubject(subjectId, review);
       if (!silent) pushToast(`已将「${review.title}」提交到 Prompt 审核仓库。`);

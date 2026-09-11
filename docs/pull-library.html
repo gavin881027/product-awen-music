@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Awen 收藏库只读导入</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body { max-width: 860px; margin: 36px auto; padding: 0 20px; background: #11151d; color: #e7edf7; line-height: 1.6; }
+    button { border: 0; border-radius: 9px; padding: 10px 14px; cursor: pointer; font: inherit; font-weight: 700; background: #68d2ea; color: #09232b; margin: 0 8px 10px 0; }
+    button.secondary { background: #273345; color: #e7edf7; } button:disabled { opacity: .5; cursor: not-allowed; }
+    .card { border: 1px solid #2e3c50; border-radius: 12px; padding: 18px; margin: 18px 0; background: #171e29; }
+    #status { white-space: pre-wrap; min-height: 2em; } .error { color: #ffacac; } .ok { color: #84e8b7; }
+    .warn { color: #ffd283; } ul { margin: 8px 0; } code { color: #9de3f3; }
+  </style>
+</head>
+<body>
+  <h1>Awen 收藏库：GitHub → 本机</h1>
+  <p>此页面只会从 GitHub <strong>读取</strong> <code>docs/library.json</code>。点击“确认导入”前不会写入浏览器存储；导入只更新主应用使用的 <code>awen_local_library_v1</code>，并保留本机独有收藏。</p>
+  <div class="card">
+    <button id="read">从 GitHub 读取并预览</button>
+    <button id="download" class="secondary" disabled>下载远端 JSON 备份</button>
+    <button id="import" disabled>确认导入到 Awen 曲库</button>
+    <div id="status">尚未读取。</div>
+  </div>
+  <div id="preview" class="card" hidden></div>
+<script>
+(() => {
+  'use strict';
+  const GH_LIB_PATH = 'docs/library.json';
+  const LOCAL_LIB_KEY = 'awen_local_library_v1';
+  const DEFAULT_REPO = 'awenstudio/product-awen-music';
+  const state = { remote: null, merged: null, mergedDocument: null };
+  const $ = selector => document.querySelector(selector);
+  const status = $('#status');
+  const preview = $('#preview');
+  const readButton = $('#read');
+  const importButton = $('#import');
+  const downloadButton = $('#download');
+
+  function setStatus(message, kind = '') { status.textContent = message; status.className = kind; }
+  function normalizeRepo(value) {
+    const repo = String(value || '').trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '');
+    return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) ? repo : '';
+  }
+  function fromBase64Utf8(value) {
+    const raw = atob(String(value || '').replace(/\n/g, ''));
+    return new TextDecoder().decode(Uint8Array.from(raw, ch => ch.charCodeAt(0)));
+  }
+  const LIBRARY_SCHEMA_VERSION = 3;
+  function legacySyncId(item) {
+    const basis = JSON.stringify({ id: String(item?.id || ''), type: String(item?.type || (item?.sel ? 'song' : 'album')), title: String(item?.title || ''), createdAt: String(item?.createdAt || '') });
+    let hash = 2166136261; for (let i = 0; i < basis.length; i += 1) { hash ^= basis.charCodeAt(i); hash = Math.imul(hash, 16777619); }
+    return `legacy-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+  }
+  function syncId(item) { return String(item?.syncId || legacySyncId(item)); }
+  function normalizeDocument(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !Array.isArray(value.songs)) throw new Error('远端文件不是有效曲库：需要包含 songs 数组的 JSON 对象。');
+    const seen = new Set();
+    const songs = value.songs.map((item, index) => {
+      if (!item || typeof item !== 'object' || !String(item.id || '').trim()) throw new Error(`第 ${index + 1} 条收藏缺少有效 id。`);
+      const normalized = { ...item, syncId: syncId(item), updatedAt: String(item.updatedAt || item.savedAt || item.createdAt || '') };
+      if (seen.has(normalized.syncId)) throw new Error(`远端曲库含重复 syncId：${normalized.syncId}。本页不会自动覆盖。`);
+      seen.add(normalized.syncId); return normalized;
+    });
+    const tombstones = Array.isArray(value.tombstones) ? value.tombstones.filter(row => row?.syncId).map(row => ({ syncId: String(row.syncId), deletedAt: String(row.deletedAt || '') })) : [];
+    return { version: LIBRARY_SCHEMA_VERSION, songs, tombstones };
+  }
+  function readLocal() {
+    try { return normalizeDocument(JSON.parse(localStorage.getItem(LOCAL_LIB_KEY) || '{"version":3,"songs":[],"tombstones":[]}')); }
+    catch { return { version: LIBRARY_SCHEMA_VERSION, songs: [], tombstones: [] }; }
+  }
+  function itemUpdatedAt(item) { return String(item?.updatedAt || item?.savedAt || item?.createdAt || ''); }
+  function mergeDocuments(remote, local) {
+    const items = new Map();
+    [...remote.songs, ...local.songs].forEach(item => {
+      const key = syncId(item); const previous = items.get(key);
+      if (!previous || itemUpdatedAt(item) >= itemUpdatedAt(previous)) items.set(key, item);
+    });
+    const tombstones = new Map();
+    [...remote.tombstones, ...local.tombstones].forEach(row => {
+      const previous = tombstones.get(row.syncId);
+      if (!previous || row.deletedAt >= previous.deletedAt) tombstones.set(row.syncId, row);
+    });
+    const songs = [...items.values()].filter(item => {
+      const deletedAt = tombstones.get(syncId(item))?.deletedAt || '';
+      return !deletedAt || itemUpdatedAt(item) > deletedAt;
+    });
+    return { version: LIBRARY_SCHEMA_VERSION, songs, tombstones: [...tombstones.values()] };
+  }
+  function compare(remote, local) {
+    const localBySync = new Map(local.songs.map(item => [syncId(item), item]));
+    const conflicts = remote.songs.filter(item => localBySync.has(syncId(item)) && JSON.stringify(localBySync.get(syncId(item))) !== JSON.stringify(item));
+    const remoteOnly = remote.songs.filter(item => !localBySync.has(syncId(item)));
+    const remoteSyncIds = new Set(remote.songs.map(syncId));
+    const localOnly = local.songs.filter(item => !remoteSyncIds.has(syncId(item)));
+    return { conflicts, remoteOnly, localOnly };
+  }
+  function renderPreview(remote, local) {
+    const summary = compare(remote, local);
+    const mergedDocument = mergeDocuments(remote, local);
+    state.mergedDocument = mergedDocument;
+    state.merged = mergedDocument.songs;
+    preview.hidden = false;
+    preview.replaceChildren();
+    const h2 = document.createElement('h2'); h2.textContent = '导入预览'; preview.appendChild(h2);
+    const note = document.createElement('p');
+    note.textContent = `远端 ${remote.songs.length} 条；本机 ${local.songs.length} 条；新增 ${summary.remoteOnly.length} 条；保留本机独有 ${summary.localOnly.length} 条；同 syncId 内容冲突 ${summary.conflicts.length} 条；远端删除记录 ${remote.tombstones.length} 条。`;
+    preview.appendChild(note);
+    if (summary.conflicts.length) {
+      const warning = document.createElement('p'); warning.className = 'warn';
+      warning.textContent = `检测到冲突 syncId：${summary.conflicts.map(item => syncId(item)).join('、')}。为保护数据，不能导入。请先下载备份并处理冲突。`;
+      preview.appendChild(warning); importButton.disabled = true;
+    } else {
+      const safe = document.createElement('p'); safe.className = 'ok'; safe.textContent = '未发现同一同步记录的内容冲突。确认导入会保留本机独有收藏与删除记录。'; preview.appendChild(safe);
+      importButton.disabled = false;
+    }
+    const list = document.createElement('ul');
+    remote.songs.slice(0, 50).forEach((item, index) => { const li = document.createElement('li'); li.textContent = `${index + 1}. ${item.title || '(无标题)'} · ${item.id} · ${syncId(item)}`; list.appendChild(li); });
+    preview.appendChild(list);
+    if (remote.songs.length > 50) { const extra = document.createElement('p'); extra.textContent = `仅展示前 50 条，共 ${remote.songs.length} 条。`; preview.appendChild(extra); }
+  }
+  async function pull() {
+    state.remote = null; state.merged = null; state.mergedDocument = null; preview.hidden = true; importButton.disabled = true; downloadButton.disabled = true;
+    const repo = normalizeRepo(localStorage.getItem('github_repo')) || DEFAULT_REPO;
+    const token = localStorage.getItem('github_pat');
+    if (!token) { setStatus('未在当前地址找到 GitHub PAT。请从同一地址打开 Awen 主页，在设置中保存 GitHub 同步配置。不同端口或 localhost/127.0.0.1 的存储彼此隔离。', 'error'); return; }
+    readButton.disabled = true; setStatus(`正在只读获取 ${repo}/${GH_LIB_PATH} …`);
+    try {
+      const path = GH_LIB_PATH.split('/').map(encodeURIComponent).join('/');
+      const response = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' } });
+      if (response.status === 404) throw new Error(`GitHub 未找到 ${GH_LIB_PATH}（404）。请确认此仓库存在该路径，或确认 PAT 有访问权限。`);
+      if (!response.ok) throw new Error(`GitHub ${response.status}: ${(await response.text()).slice(0, 300)}`);
+      const file = await response.json();
+      state.remote = normalizeDocument(JSON.parse(fromBase64Utf8(file.content)));
+      renderPreview(state.remote, readLocal());
+      downloadButton.disabled = false;
+      setStatus(`读取成功：${state.remote.songs.length} 条远端收藏。请检查预览后再确认导入。`, 'ok');
+    } catch (error) { setStatus(`读取失败：${error.message || error}`, 'error'); }
+    finally { readButton.disabled = false; }
+  }
+  function download() {
+    if (!state.remote) return;
+    const blob = new Blob([JSON.stringify(state.remote, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = url; a.download = `awen-library-remote-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click(); URL.revokeObjectURL(url);
+    setStatus('已下载远端曲库备份；尚未导入浏览器。', 'ok');
+  }
+  function importLibrary() {
+    if (!state.remote || !state.mergedDocument || importButton.disabled) return;
+    const currentLocal = readLocal();
+    if (compare(state.remote, currentLocal).conflicts.length) { setStatus('本机数据在预览后发生冲突变化，已取消导入。请重新读取并预览。', 'error'); return; }
+    try {
+      // A local backup is mandatory: if quota or privacy settings reject it,
+      // leave the original library untouched rather than risking replacement.
+      const backupKey = `${LOCAL_LIB_KEY}_backup_before_import_${Date.now()}`;
+      const currentRaw = localStorage.getItem(LOCAL_LIB_KEY);
+      localStorage.setItem(backupKey, currentRaw || JSON.stringify({ version: LIBRARY_SCHEMA_VERSION, songs: [], tombstones: [] }));
+      localStorage.setItem(LOCAL_LIB_KEY, JSON.stringify(state.mergedDocument));
+      setStatus(`导入完成：主应用曲库现在有 ${state.merged.length} 条收藏。已创建本机导入前备份；回到 Awen 主页面并刷新即可查看。`, 'ok');
+      importButton.disabled = true;
+    } catch (error) { setStatus(`导入失败，未确认保存成功：${error.message || error}。原曲库可能仍在，请勿重复导入并先检查浏览器存储空间。`, 'error'); }
+  }
+  readButton.addEventListener('click', pull); downloadButton.addEventListener('click', download); importButton.addEventListener('click', importLibrary);
+})();
+</script>
+</body>
+</html>

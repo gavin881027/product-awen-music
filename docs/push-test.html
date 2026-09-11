@@ -1,99 +1,55 @@
-<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>GitHub 推送完整测试</title></head>
-<body style="font-family:monospace;padding:20px;background:#1a1a1a;color:#ddd">
-<h2>GitHub 推送完整测试</h2>
-<button onclick="testFlow()" style="padding:8px 16px;font-size:14px;cursor:pointer">开始测试推送流程</button>
-<pre id="out" style="margin-top:20px;white-space:pre-wrap"></pre>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Awen GitHub 只读同步诊断</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body { max-width: 820px; margin: 42px auto; padding: 0 20px; background: #11151d; color: #e7edf7; line-height: 1.6; }
+    button { border: 0; border-radius: 9px; padding: 10px 14px; cursor: pointer; font: inherit; font-weight: 700; background: #68d2ea; color: #09232b; }
+    button:disabled { opacity: .5; cursor: wait; } pre { white-space: pre-wrap; padding: 16px; border: 1px solid #2e3c50; border-radius: 12px; background: #171e29; }
+  </style>
+</head>
+<body>
+  <h1>GitHub 收藏同步：只读诊断</h1>
+  <p>此页面只发送 GET 请求，不会创建、修改或删除任何 GitHub 文件。它检查主应用实际使用的 <code>docs/library.json</code>。</p>
+  <button id="run">开始只读检查</button>
+  <pre id="out">等待检查。</pre>
 <script>
-const out = document.getElementById('out');
-let log = '';
-const add = s => { log += s + '\n'; out.textContent = log; };
-
-async function testFlow() {
-  log = ''; add('=== 开始测试 ===');
-  const repo = localStorage.getItem('github_repo') || 'awenstudio/product-awen-music';
-  const pat = localStorage.getItem('github_pat');
-  const path = 'library.json';
-
-  add(`仓库: ${repo}`);
-  add(`PAT: ${pat ? '已存储 (后6位: ' + pat.slice(-6) + ')' : '未配置'}`);
-  add('');
-
-  if (!pat) { add('❌ 未配置 PAT'); return; }
-
-  const headers = {
-    'Authorization': `Bearer ${pat}`,
-    'Accept': 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28'
+(() => {
+  'use strict';
+  const GH_LIB_PATH = 'docs/library.json';
+  const DEFAULT_REPO = 'awenstudio/product-awen-music';
+  const out = document.querySelector('#out'); const button = document.querySelector('#run');
+  const lines = []; const add = text => { lines.push(text); out.textContent = lines.join('\n'); };
+  const normalizeRepo = value => {
+    const repo = String(value || '').trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '');
+    return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo) ? repo : '';
   };
-
-  try {
-    add('步骤 1: 检查仓库权限...');
-    const r1 = await fetch(`https://api.github.com/repos/${repo}`, { headers });
-    add(`  HTTP ${r1.status}`);
-    if (r1.status !== 200) {
-      add(`  ❌ 仓库查询失败: ${await r1.text()}`);
-      return;
-    }
-    const repoData = await r1.json();
-    add(`  ✓ 仓库: ${repoData.full_name}`);
-    add(`  ✓ 权限: ${repoData.permissions?.push ? '可写' : '只读'}`);
-    if (!repoData.permissions?.push) {
-      add('  ❌ PAT 无写权限，中止测试');
-      return;
-    }
-    add('');
-
-    add('步骤 2: 尝试读取现有文件...');
-    const r2 = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, { headers });
-    add(`  HTTP ${r2.status}`);
-    let sha = null;
-    if (r2.status === 200) {
-      const fileData = await r2.json();
-      sha = fileData.sha;
-      add(`  ✓ 文件已存在，SHA: ${sha.slice(0, 8)}...`);
-    } else if (r2.status === 404) {
-      add(`  ✓ 文件不存在（首次推送）`);
-    } else {
-      add(`  ⚠️ 非预期状态: ${await r2.text()}`);
-    }
-    add('');
-
-    add('步骤 3: 写入测试数据...');
-    const testData = { version: 2, songs: [{ id: 'TEST-001', title: '测试歌曲', createdAt: new Date().toISOString() }] };
-    const json = JSON.stringify(testData, null, 2);
-    const content = btoa(unescape(encodeURIComponent(json)));
-
-    const payload = {
-      message: 'test: Awen 推送测试',
-      content,
-      ...(sha ? { sha } : {})
-    };
-
-    add(`  请求体: ${JSON.stringify(payload, null, 2).slice(0, 200)}...`);
-    add('');
-
-    const r3 = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, {
-      method: 'PUT',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-
-    add(`  HTTP ${r3.status}`);
-    const r3text = await r3.text();
-
-    if (r3.status === 200 || r3.status === 201) {
-      const result = JSON.parse(r3text);
-      add(`  ✅ 推送成功！`);
-      add(`  新 SHA: ${result.content.sha.slice(0, 8)}...`);
-      add(`  查看: https://github.com/${repo}/blob/main/${path}`);
-    } else {
-      add(`  ❌ 推送失败:`);
-      add(r3text);
-    }
-  } catch (e) {
-    add(`❌ 异常: ${e.message}`);
+  async function run() {
+    lines.length = 0; button.disabled = true;
+    const repo = normalizeRepo(localStorage.getItem('github_repo')) || DEFAULT_REPO;
+    const pat = localStorage.getItem('github_pat');
+    add('=== Awen GitHub 只读同步诊断 ==='); add(`仓库：${repo}`); add(`文件：${GH_LIB_PATH}`); add(`PAT：${pat ? '当前地址已配置（不显示内容）' : '当前地址未配置'}`); add('');
+    if (!pat) { add('未找到 PAT。请在与本页相同的协议、主机和端口下打开 Awen 主页面并保存设置。不同端口及 localhost/127.0.0.1 的浏览器存储彼此隔离。'); button.disabled = false; return; }
+    const headers = { Authorization: `Bearer ${pat}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' };
+    try {
+      add('步骤 1：读取仓库信息（GET）…');
+      const repoResponse = await fetch(`https://api.github.com/repos/${repo}`, { headers }); add(`  HTTP ${repoResponse.status}`);
+      if (!repoResponse.ok) { add(`  无法读取仓库：${(await repoResponse.text()).slice(0, 400)}`); return; }
+      const info = await repoResponse.json(); add(`  仓库：${info.full_name}`); add(`  写入权限标志：${info.permissions?.push ? 'push=true' : 'push=false 或未返回'}`);
+      add('步骤 2：读取收藏文件（GET）…');
+      const path = GH_LIB_PATH.split('/').map(encodeURIComponent).join('/');
+      const fileResponse = await fetch(`https://api.github.com/repos/${repo}/contents/${path}`, { headers }); add(`  HTTP ${fileResponse.status}`);
+      if (fileResponse.status === 404) { add(`  未找到 ${GH_LIB_PATH}。这可能是文件尚未创建，也可能是 PAT 无权访问私有仓库；本页不会尝试创建文件。`); return; }
+      if (!fileResponse.ok) { add(`  读取失败：${(await fileResponse.text()).slice(0, 400)}`); return; }
+      const file = await fileResponse.json(); add(`  找到文件：${file.path}`); add(`  SHA：${String(file.sha || '').slice(0, 12)}…`); add(`  大小：${file.size ?? '未知'} bytes`); add(''); add('完成：本次仅发送 GET 请求，未写入 GitHub。');
+    } catch (error) { add(`网络或浏览器错误：${error.message || error}`); }
+    finally { button.disabled = false; }
   }
-}
+  button.addEventListener('click', run);
+})();
 </script>
-</body></html>
+</body>
+</html>
