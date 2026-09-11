@@ -8,9 +8,14 @@ const root = path.resolve(import.meta.dirname, '..');
 const app = fs.readFileSync(path.join(root, 'docs/index.html'), 'utf8');
 const recovery = fs.readFileSync(path.join(root, 'docs/restore-today.html'), 'utf8');
 
-test('state persistence strips only disposable cover previews', () => {
+test('state persistence strips only disposable cover previews and duplicate review source packets', () => {
+  assert.match(app, /function compactReviewForStorage\(review\)/);
+  assert.match(app, /const \{ source, \.\.\.compact \} = review/);
+  assert.match(app, /function compactSongForStorage\(song\)/);
   assert.match(app, /function compactAlbumForStorage\(album\)/);
-  assert.match(app, /const \{ previewDataUrl, \.\.\.coverAsset \} = album\.coverAsset/);
+  assert.match(app, /promptReview: compactReviewForStorage\(track\.promptReview\)/);
+  assert.match(app, /const \{ previewDataUrl, \.\.\.coverAsset \} = compact\.coverAsset/);
+  assert.match(app, /songs: \(snapshot\?\.songs \|\| \[\]\)\.map\(compactSongForStorage\)/);
   assert.match(app, /albums: \(snapshot\?\.albums \|\| \[\]\)\.map\(compactAlbumForStorage\)/);
   assert.match(app, /JSON\.stringify\(compactSnapshotForStorage\(snapshot\)\)/);
   assert.match(app, /album\.coverAsset\?\.previewDataUrl \|\| album\.coverAsset\?\.downloadUrl/);

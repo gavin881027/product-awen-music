@@ -5628,17 +5628,39 @@ function App() {
   const _writeTimer = React.useRef(null);
   const _latestState = React.useRef(null);
   const _storageWarningShown = React.useRef(false);
-  // Cover previews are display conveniences. They can be hundreds of KB each
-  // and previously made every state snapshot consume localStorage quota. Keep
-  // the GitHub/download metadata but omit the inline image from durable state.
+  // Cover previews and review source packets are display/rebuild conveniences.
+  // Keeping both in every rolling snapshot can exhaust localStorage even though
+  // the canonical review files and current recipes remain available remotely.
+  function compactReviewForStorage(review) {
+    if (!review?.source) return review;
+    const { source, ...compact } = review;
+    return compact;
+  }
+  function compactSongForStorage(song) {
+    if (!song?.promptReview?.source) return song;
+    return { ...song, promptReview: compactReviewForStorage(song.promptReview) };
+  }
   function compactAlbumForStorage(album) {
-    if (!album?.coverAsset?.previewDataUrl) return album;
-    const { previewDataUrl, ...coverAsset } = album.coverAsset;
-    return { ...album, coverAsset };
+    const tracks = album?.data?.tracks;
+    const hasReviewSource = Array.isArray(tracks) && tracks.some(track => track?.promptReview?.source);
+    const hasPreview = !!album?.coverAsset?.previewDataUrl;
+    if (!hasReviewSource && !hasPreview) return album;
+    const compactData = hasReviewSource
+      ? { ...album.data, tracks: tracks.map(track => track?.promptReview?.source
+        ? { ...track, promptReview: compactReviewForStorage(track.promptReview) }
+        : track) }
+      : album.data;
+    const compact = { ...album, data: compactData };
+    if (hasPreview) {
+      const { previewDataUrl, ...coverAsset } = compact.coverAsset;
+      compact.coverAsset = coverAsset;
+    }
+    return compact;
   }
   function compactSnapshotForStorage(snapshot) {
     return {
       ...snapshot,
+      songs: (snapshot?.songs || []).map(compactSongForStorage),
       albums: (snapshot?.albums || []).map(compactAlbumForStorage),
     };
   }
