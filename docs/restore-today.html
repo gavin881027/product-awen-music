@@ -17,7 +17,7 @@
   <div class="card">
     <p>将恢复两张已保存到 GitHub 审核仓库的专辑：</p>
     <ol><li>After Hours Book Café（16 首）</li><li>Pine Air Focus Field（16 首）</li></ol>
-    <p>恢复前会先备份当前浏览器中的 Awen 状态；不会删除现有歌曲或专辑。</p>
+    <p>恢复前会将当前浏览器中的 Awen 状态下载为 JSON 备份；不会删除现有歌曲或专辑。</p>
     <button id="restore">从 GitHub 恢复到 Awen</button>
     <p id="status">准备就绪。</p>
   </div>
@@ -56,6 +56,25 @@
   }
   const section = (text, name) => (text.match(new RegExp(`### ${name}\\n\\n([\\s\\S]*?)(?=\\n\\n###|$)`)) || [,''])[1].trim();
   const value = (text, label) => (text.match(new RegExp(`^- ${label}：(.+)$`, 'm')) || [,''])[1].trim();
+  function downloadStateBackup(text) {
+    const blob = new Blob([text || '{}'], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `awen-state-before-recovery-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+  function compactState(state) {
+    return {
+      ...state,
+      albums: (state?.albums || []).map(album => {
+        if (!album?.coverAsset?.previewDataUrl) return album;
+        const { previewDataUrl, ...coverAsset } = album.coverAsset;
+        return { ...album, coverAsset };
+      }),
+    };
+  }
   function recipeFromDraft(text, workspace) {
     const title = value(text, 'Song Title') || value(text, '标题') || 'Untitled';
     const lyricsRoute = value(text, 'Lyrics 路线') === 'instrumental' ? 'instrumental' : 'structure-prompt';
@@ -100,12 +119,14 @@
         recovered.push({ id: target.id, axisLabel: 'Recovered from GitHub', base: {}, status: 'Draft', generating: false, starred: false, aiProvider: 'GitHub recovery', aiProviderUsed: false, createdAt: new Date().toLocaleString('zh-CN'), data: { album: target.album, workspace: target.workspace, anchor: tracks[0].style, tracks, cover: '', video: '', thumb: '' } });
       }
       const previousText = localStorage.getItem(STORE_KEY);
-      localStorage.setItem(`${STORE_KEY}_backup_before_recovery_${Date.now()}`, previousText || '{}');
+      // Browser storage has a small per-origin quota. Keep recovery backups as
+      // user-downloadable files rather than accumulating full state snapshots.
+      downloadStateBackup(previousText);
       const previous = JSON.parse(previousText || '{}');
       const retained = (previous.albums || []).filter(album => !TARGETS.some(target => target.id === album.id));
       const maxId = Math.max(...recovered.concat(retained).map(item => Number(String(item.id || '').match(/ALB-(\d+)/)?.[1]) || 0), 0);
       const next = { ...previous, mode: 'album', albums: [...recovered, ...retained], songs: previous.songs || [], albumSeq: Math.max(Number(previous.albumSeq || 1), maxId + 1) };
-      localStorage.setItem(STORE_KEY, JSON.stringify(next));
+      localStorage.setItem(STORE_KEY, JSON.stringify(compactState(next)));
       setStatus('恢复成功：两张专辑与 32 首审核配方已经恢复。现在回到 Awen 页面并刷新即可查看。', 'ok');
     } catch (error) {
       setStatus(`恢复失败：${error.message || error}`, 'err');

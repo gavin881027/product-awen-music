@@ -2876,7 +2876,7 @@ title: ${JSON.stringify(recipe.title || review.title)}
 status: ${result.decision}
 sourceHash: ${review.sourceHash}
 revision: ${revision}
-reviewedAt: ${result.reviewedAt}
+reviewedAt: ${review.submittedAt || 'unknown'}
 sourceFile: ${review.sourcePath}
 ---
 
@@ -2971,7 +2971,6 @@ function validatePromptReviewResult(raw, review) {
     changes: raw.changes.map(reviewSafeText),
     risks: raw.risks.map(reviewSafeText),
     summary: reviewSafeText(raw.summary || ''),
-    reviewedAt: new Date().toISOString(),
   };
 }
 
@@ -3889,6 +3888,7 @@ function AlbumPromptReviewPanel({ album, onSubmitAll, onCopyAll, onApplyAll }) {
   const [reviewJson, setReviewJson] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
   const [applying, setApplying] = React.useState(false);
+  const [applyProgress, setApplyProgress] = React.useState('');
   const tracks = album?.data?.tracks || [];
   const submittedCount = tracks.filter(track => !!track.promptReview).length;
   const allSubmitted = tracks.length > 0 && submittedCount === tracks.length;
@@ -3905,9 +3905,10 @@ function AlbumPromptReviewPanel({ album, onSubmitAll, onCopyAll, onApplyAll }) {
   };
   const apply = async () => {
     setApplying(true);
+    setApplyProgress(`正在检查 ${tracks.length} 首审核结果…`);
     try {
-      const accepted = await onApplyAll(album.id, reviewJson);
-      if (accepted) setReviewJson('');
+      const accepted = await onApplyAll(album.id, reviewJson, { onProgress: setApplyProgress });
+      if (accepted) { setReviewJson(''); setApplyProgress('审核结果已全部应用并同步。'); }
     } finally {
       setApplying(false);
     }
@@ -3947,6 +3948,7 @@ function AlbumPromptReviewPanel({ album, onSubmitAll, onCopyAll, onApplyAll }) {
               {applying ? '正在应用整张专辑审核…' : '应用整张专辑审核并推送'}
             </button>
           </div>
+          {applyProgress && <div className="settings-note" role="status" style={{marginTop:10}}>{applyProgress}</div>}
         </div>}
       </div>
     </details>
@@ -4000,10 +4002,9 @@ function AlbumCard({ album, onStatus, onDelete, onPin, onStar, onCoverUpload, on
   const albumDurationSec = data?.tracks?.reduce((sum, tr) => sum + trackRecipe(tr).durationSec, 0) || 0;
   // Once an audit has been applied, the consolidated prompt at the end of the
   // album is the active source of truth; first-stage per-track copies can fold.
-  const hasAppliedAlbumAudit = (data?.tracks || []).some(track => {
-    const review = track?.promptReview;
+  function hasAppliedPromptAudit(review) {
     return !!review && ((review.reviewCount || 0) > 0 || !!review.adoptedRevision || !!review.supersedes);
-  });
+  }
   const copyAll = data &&
 `=== AWEN STUDY · ALBUM ===
 ${data.album}
@@ -4236,8 +4237,8 @@ ${group.tracks.length ? group.tracks.map(({ track: tr, index: i }) => {
       <div className="album-top">
         <div className="album-cover">
           <div className="album-cover-frame">
-            {album.coverAsset?.previewDataUrl
-              ? <img className="album-cover-image" src={album.coverAsset.previewDataUrl} alt={`${data?.album || album.id} cover`} />
+            {(album.coverAsset?.previewDataUrl || album.coverAsset?.downloadUrl)
+              ? <img className="album-cover-image" src={album.coverAsset.previewDataUrl || album.coverAsset.downloadUrl} alt={`${data?.album || album.id} cover`} />
               : <Placeholder label="cover" ratio="1 / 1" />}
           </div>
           <input ref={coverInputRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={uploadCover} />
@@ -4426,7 +4427,7 @@ ${group.tracks.length ? group.tracks.map(({ track: tr, index: i }) => {
                     {data.atmosphere && <div className="kv"><span className="k">ATMOSPHERE</span><span className="v">{data.atmosphere}</span></div>}
                     {tr.prompt && <div className="kv"><span className="k">TRACK NOTE</span><span className="v">{tr.prompt}</span></div>}
                   </div>
-                  {hasAppliedAlbumAudit ? (
+                  {hasAppliedPromptAudit(tr.promptReview) ? (
                     <details className="track-suno-fold">
                       <summary>第一阶段 Suno 配方 · 已归档（查看原始生成内容）</summary>
                       <SunoBridgePanel recipe={trackRecipe(tr)} compact promptId={albumTrackPromptId(album.id, i)} />
@@ -5626,6 +5627,25 @@ function App() {
   // recovery if a browser write is interrupted.
   const _writeTimer = React.useRef(null);
   const _latestState = React.useRef(null);
+  const _storageWarningShown = React.useRef(false);
+  // Cover previews are display conveniences. They can be hundreds of KB each
+  // and previously made every state snapshot consume localStorage quota. Keep
+  // the GitHub/download metadata but omit the inline image from durable state.
+  function compactAlbumForStorage(album) {
+    if (!album?.coverAsset?.previewDataUrl) return album;
+    const { previewDataUrl, ...coverAsset } = album.coverAsset;
+    return { ...album, coverAsset };
+  }
+  function compactSnapshotForStorage(snapshot) {
+    return {
+      ...snapshot,
+      albums: (snapshot?.albums || []).map(compactAlbumForStorage),
+    };
+  }
+  function compactStoredSnapshot(text) {
+    try { return JSON.stringify(compactSnapshotForStorage(JSON.parse(text))); }
+    catch (e) { return String(text || ''); }
+  }
   function snapshotState() {
     return {
       mode, sel, locks,
@@ -5637,11 +5657,22 @@ function App() {
   function persistState(snapshot) {
     if (!snapshot) return;
     try {
-      const next = JSON.stringify(snapshot);
+      const next = JSON.stringify(compactSnapshotForStorage(snapshot));
       const previous = localStorage.getItem(STORE_KEY);
-      if (previous && previous !== next) localStorage.setItem(STORE_BACKUP_KEY, previous);
+      // Save the live state first. localStorage writes are atomic; this means a
+      // backup quota failure cannot block a user's newest album or favourite.
       localStorage.setItem(STORE_KEY, next);
-    } catch (e) {}
+      if (previous && previous !== next) {
+        try { localStorage.setItem(STORE_BACKUP_KEY, compactStoredSnapshot(previous)); }
+        catch (backupError) {}
+      }
+      _storageWarningShown.current = false;
+    } catch (error) {
+      if (!_storageWarningShown.current) {
+        _storageWarningShown.current = true;
+        pushToast('本地状态保存失败：浏览器存储空间不足。请先导出备份并清理旧状态备份；当前未保存的更改请勿刷新页面。', { kind: 'error', duration: 15000 });
+      }
+    }
   }
   React.useLayoutEffect(() => {
     _latestState.current = snapshotState();
@@ -5817,14 +5848,30 @@ function App() {
     }
     return error?.message || 'GitHub 同步失败';
   }
+  const GH_REQUEST_TIMEOUT_MS = 30000;
   async function ghFetch(method, url, body, token) {
     const pat = token || safeLS.get('github_pat');
     if (!pat) throw new Error('需要 GitHub PAT');
-    const res = await fetch(url, {
-      method,
-      headers: { Authorization: `Bearer ${pat}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(body ? { 'Content-Type': 'application/json' } : {}) },
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), GH_REQUEST_TIMEOUT_MS);
+    let res;
+    try {
+      res = await fetch(url, {
+        method,
+        headers: { Authorization: `Bearer ${pat}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        const timeoutError = new Error(`GitHub 请求超时（${Math.round(GH_REQUEST_TIMEOUT_MS / 1000)} 秒）`);
+        timeoutError.status = 504;
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
     if (!res.ok) {
       const raw = await res.text();
       let detail = '';
@@ -6507,7 +6554,8 @@ function App() {
     });
     return [...grouped.entries()].map(([reason, ids]) => `${ids.join('、')}：${reason}`).join('；');
   }
-  async function applyAlbumPromptReviews(albumId, rawJson) {
+  async function applyAlbumPromptReviews(albumId, rawJson, options = {}) {
+    const reportProgress = message => { if (typeof options.onProgress === 'function') options.onProgress(message); };
     const album = findAlbumForReview(albumId);
     const tracks = album?.data?.tracks || [];
     if (!album || !tracks.length) {
@@ -6552,7 +6600,11 @@ function App() {
       return true;
     }
     const failed = [];
+    let completed = 0;
+    reportProgress(`将应用 ${pending.length} 首审核结果${alreadyApplied ? `；此前已完成 ${alreadyApplied} 首` : ''}。`);
     for (const { result } of pending) {
+      completed += 1;
+      reportProgress(`正在应用第 ${completed}/${pending.length} 首：${result.id}…`);
       // Album review is intentionally hands-off: a full GPT revision is
       // written into its track immediately and becomes the next review draft.
       let failure = null;
@@ -6561,7 +6613,12 @@ function App() {
         autoAdoptNeedsRevision: true,
         onError: error => { failure = error; },
       });
-      if (!applied) failed.push({ id: result.id, error: failure || new Error('未取得具体错误信息') });
+      if (!applied) {
+        failed.push({ id: result.id, error: failure || new Error('未取得具体错误信息') });
+        reportProgress(`第 ${completed}/${pending.length} 首未完成：${result.id}。继续处理其余曲目…`);
+      } else {
+        reportProgress(`已应用第 ${completed}/${pending.length} 首：${result.id}。`);
+      }
     }
     if (failed.length) {
       const appliedNow = pending.length - failed.length;
